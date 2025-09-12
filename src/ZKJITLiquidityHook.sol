@@ -8,8 +8,8 @@ import {PoolKey} from "v4-core/types/PoolKey.sol";
 import {PoolId, PoolIdLibrary} from "v4-core/types/PoolId.sol";
 import {BalanceDelta} from "v4-core/types/BalanceDelta.sol";
 import {BeforeSwapDelta, BeforeSwapDeltaLibrary} from "v4-core/types/BeforeSwapDelta.sol";
-// import "@fhenixprotocol/cofhe-contracts/FHE.sol";
-import "cofhe-contracts/FHE.sol";
+import "@fhenixprotocol/cofhe-contracts/FHE.sol";
+// import "cofhe-contracts/FHE.sol";
 import {ModifyLiquidityParams, SwapParams} from "v4-core/types/PoolOperation.sol";
 
 /**

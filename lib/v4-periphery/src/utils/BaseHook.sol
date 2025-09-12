@@ -143,6 +143,7 @@ abstract contract BaseHook is IHooks, ImmutableState {
     /// @inheritdoc IHooks
     function beforeSwap(address sender, PoolKey calldata key, SwapParams calldata params, bytes calldata hookData)
         external
+        virtual
         onlyPoolManager
         returns (bytes4, BeforeSwapDelta, uint24)
     {
@@ -164,7 +165,7 @@ abstract contract BaseHook is IHooks, ImmutableState {
         SwapParams calldata params,
         BalanceDelta delta,
         bytes calldata hookData
-    ) external onlyPoolManager returns (bytes4, int128) {
+    ) external virtual onlyPoolManager returns (bytes4, int128) {
         return _afterSwap(sender, key, params, delta, hookData);
     }
 
