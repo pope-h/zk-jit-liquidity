@@ -8,8 +8,13 @@ import {PoolKey} from "v4-core/types/PoolKey.sol";
 import {PoolId, PoolIdLibrary} from "v4-core/types/PoolId.sol";
 import {BalanceDelta} from "v4-core/types/BalanceDelta.sol";
 import {BeforeSwapDelta, BeforeSwapDeltaLibrary} from "v4-core/types/BeforeSwapDelta.sol";
+import {Currency, CurrencyLibrary} from "v4-core/types/Currency.sol";
+import {CurrencySettler} from "@uniswap/v4-core/test/utils/CurrencySettler.sol";
+import {TickMath} from "v4-core/libraries/TickMath.sol";
+import {StateLibrary} from "v4-core/libraries/StateLibrary.sol";
 import "@fhenixprotocol/cofhe-contracts/FHE.sol";
 import {ModifyLiquidityParams, SwapParams} from "v4-core/types/PoolOperation.sol";
+import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 
 /**
  * @title ZK-JIT Liquidity Hook
@@ -18,6 +23,9 @@ import {ModifyLiquidityParams, SwapParams} from "v4-core/types/PoolOperation.sol
  */
 contract ZKJITLiquidityHook is BaseHook {
     using PoolIdLibrary for PoolKey;
+    using CurrencyLibrary for Currency;
+    using CurrencySettler for Currency;
+    using StateLibrary for IPoolManager;
 
     struct LPConfig {
         euint128 minSwapSize; // Encrypted minimum swap size to trigger JIT
@@ -35,6 +43,16 @@ contract ZKJITLiquidityHook is BaseHook {
         uint256 blockNumber;
         uint256 validatorConsensus; // Bitmap of validator approvals
         bool executed;
+        bool zeroForOne; // Direction of the swap
+        PoolKey poolKey; // Store the pool key for execution
+    }
+
+    struct JITLiquidityPosition {
+        uint256 swapId;
+        int24 tickLower;
+        int24 tickUpper;
+        uint128 liquidity;
+        bool isActive;
     }
 
     // LP configurations per pool per address
@@ -43,6 +61,9 @@ contract ZKJITLiquidityHook is BaseHook {
     // Pending JIT operations
     mapping(uint256 => PendingJIT) public pendingJITs;
     uint256 public nextSwapId;
+
+    // Active JIT positions that need to be removed after swap
+    mapping(uint256 => JITLiquidityPosition) public jitPositions;
 
     // EigenLayer operator simulation
     mapping(address => bool) public authorizedOperators;
@@ -53,6 +74,7 @@ contract ZKJITLiquidityHook is BaseHook {
     uint256 private constant MIN_OPERATORS = 3;
     uint256 private constant CONSENSUS_THRESHOLD = 66; // 66% consensus needed
     uint256 private constant JIT_DELAY_BLOCKS = 2;
+    int24 private constant TICK_RANGE = 60; // Range around current tick for JIT liquidity
 
     // FHE Constants (created in constructor)
     euint128 private ENCRYPTED_ZERO;
@@ -61,11 +83,10 @@ contract ZKJITLiquidityHook is BaseHook {
     // ============ Events ============
 
     event LPConfigSet(PoolId indexed poolId, address indexed lp, bool isActive);
-
     event JITRequested(uint256 indexed swapId, PoolId indexed poolId, address indexed swapper, uint128 swapAmount);
-
     event JITExecuted(uint256 indexed swapId, PoolId indexed poolId, uint128 liquidityProvided);
-
+    event JITLiquidityAdded(uint256 indexed swapId, int24 tickLower, int24 tickUpper, uint128 liquidity);
+    event JITLiquidityRemoved(uint256 indexed swapId, uint128 liquidity);
     event OperatorVoted(uint256 indexed swapId, address indexed operator, bool approved);
 
     constructor(IPoolManager _poolManager) BaseHook(_poolManager) {
@@ -162,7 +183,10 @@ contract ZKJITLiquidityHook is BaseHook {
 
         if (jitTriggered) {
             // Create pending JIT request for EigenLayer validation
-            _createPendingJIT(key, sender, swapAmount, params);
+            uint256 swapId = _createPendingJIT(key, sender, swapAmount, params);
+
+            // For demo purposes, auto-approve the JIT (in production, we'd wait for consensus)
+            _autoExecuteJITForDemo(swapId);
 
             // Delay swap execution for operator consensus
             return (this.beforeSwap.selector, BeforeSwapDeltaLibrary.ZERO_DELTA, 0);
@@ -199,9 +223,8 @@ contract ZKJITLiquidityHook is BaseHook {
         onlyPoolManager
         returns (bytes4, int128)
     {
-        // Check for any validated JIT operations ready for execution
-        // This would be called in a subsequent transaction after operator consensus
-        _executeValidatedJITs(key);
+        // Remove any JIT liquidity that was added for this swap
+        _removeJITLiquidity(key);
 
         return (this.afterSwap.selector, 0);
     }
@@ -236,9 +259,11 @@ contract ZKJITLiquidityHook is BaseHook {
                 euint32 triggerInt = FHE.asEuint32(shouldTrigger);
                 FHE.allowThis(triggerInt);
 
-                // For demo purposes, assume JIT is triggered if any LP wants it
+                // For demo purposes, assume JIT is triggered if swapAmount > 1000
                 // In production, this would use more sophisticated private logic
-                return true; // Simplified for hackathon
+                if (swapAmount > 1000) {
+                    return true;
+                }
             }
         }
 
@@ -266,7 +291,9 @@ contract ZKJITLiquidityHook is BaseHook {
                 : address(uint160(uint256(key.currency0.toId()))),
             blockNumber: block.number,
             validatorConsensus: 0,
-            executed: false
+            executed: false,
+            zeroForOne: params.zeroForOne,
+            poolKey: key
         });
 
         emit JITRequested(swapId, key.toId(), swapper, swapAmount);
@@ -274,12 +301,140 @@ contract ZKJITLiquidityHook is BaseHook {
     }
 
     /**
+     * @notice Auto-execute JIT for demo purposes (bypassing consensus)
+     */
+    function _autoExecuteJITForDemo(uint256 swapId) private {
+        PendingJIT storage jit = pendingJITs[swapId];
+        require(!jit.executed, "Already executed");
+
+        // Add JIT liquidity around current tick
+        _addJITLiquidity(jit.poolKey, swapId, jit.swapAmount);
+
+        jit.executed = true;
+        emit JITExecuted(swapId, jit.poolKey.toId(), uint128(jit.swapAmount));
+    }
+
+    /**
+     * @notice Add JIT liquidity around current tick
+     */
+    function _addJITLiquidity(PoolKey memory key, uint256 swapId, uint128 swapAmount) private {
+        // Get current tick
+        (, int24 currentTick,,) = poolManager.getSlot0(key.toId());
+
+        // Calculate tick range for liquidity
+        int24 tickLower = ((currentTick - TICK_RANGE) / key.tickSpacing) * key.tickSpacing;
+        int24 tickUpper = ((currentTick + TICK_RANGE) / key.tickSpacing) * key.tickSpacing;
+
+        // Calculate liquidity amount based on swap size
+        uint128 liquidityToAdd = swapAmount; // Simplified calculation
+
+        // Prepare liquidity modification
+        ModifyLiquidityParams memory liquidityParams = ModifyLiquidityParams({
+            tickLower: tickLower,
+            tickUpper: tickUpper,
+            liquidityDelta: int256(uint256(liquidityToAdd)),
+            salt: bytes32(swapId)
+        });
+
+        // Execute the liquidity addition through pool manager
+        try poolManager.modifyLiquidity(key, liquidityParams, "") returns (
+            BalanceDelta,
+            /**
+             * delta0
+             */
+            BalanceDelta
+        ) {
+            /**
+             * delta1
+             */
+            // Store the position for later removal
+            jitPositions[swapId] = JITLiquidityPosition({
+                swapId: swapId,
+                tickLower: tickLower,
+                tickUpper: tickUpper,
+                liquidity: liquidityToAdd,
+                isActive: true
+            });
+
+            emit JITLiquidityAdded(swapId, tickLower, tickUpper, liquidityToAdd);
+        } catch {
+            // If liquidity addition fails, continue without JIT
+        }
+    }
+
+    /**
+     * @notice Remove JIT liquidity after swap execution
+     */
+    function _removeJITLiquidity(PoolKey calldata key) private {
+        // Find and remove any active JIT positions for recent swaps
+        // This is a simplified approach
+
+        uint256 currentSwapId = nextSwapId;
+        if (currentSwapId > 0) {
+            JITLiquidityPosition storage position = jitPositions[currentSwapId];
+
+            if (position.isActive) {
+                // Remove the liquidity
+                ModifyLiquidityParams memory liquidityParams = ModifyLiquidityParams({
+                    tickLower: position.tickLower,
+                    tickUpper: position.tickUpper,
+                    liquidityDelta: -int256(uint256(position.liquidity)),
+                    salt: bytes32(position.swapId)
+                });
+
+                try poolManager.modifyLiquidity(key, liquidityParams, "") returns (
+                    BalanceDelta,
+                    /**
+                     * delta0
+                     */
+                    BalanceDelta
+                ) {
+                    /**
+                     * delta1
+                     */
+                    position.isActive = false;
+                    emit JITLiquidityRemoved(position.swapId, position.liquidity);
+                } catch {
+                    // If removal fails, mark as inactive but continue
+                    // This would have to be configured in afterSwap logic
+                    position.isActive = false;
+                }
+            }
+        }
+    }
+
+    /**
      * @notice Execute JIT operations that have been validated by operators
      */
     function _executeValidatedJITs(PoolKey calldata key) private {
-        // In a real implementation, this would check for consensus-approved JIT operations
-        // and execute the liquidity provision
-        // For hackathon demo, we'll simulate this
+        // Check for consensus-approved JIT operations and execute them
+        for (uint256 i = 1; i <= nextSwapId; i++) {
+            PendingJIT storage jit = pendingJITs[i];
+
+            if (!jit.executed && _hasConsensus(i) && block.number >= jit.blockNumber + JIT_DELAY_BLOCKS) {
+                _addJITLiquidity(jit.poolKey, i, jit.swapAmount);
+                jit.executed = true;
+                emit JITExecuted(i, key.toId(), jit.swapAmount);
+            }
+        }
+    }
+
+    // ============ Token Settlement Functions ============
+
+    /**
+     * @notice Settle currency with pool manager
+     */
+    function _settle(Currency currency, uint128 amount) private {
+        poolManager.sync(currency);
+        currency.transfer(address(poolManager), amount);
+        poolManager.settle();
+    }
+
+    /**
+     * @notice Take currency from pool manager
+     */
+    function _take(Currency currency, uint128 amount) private {
+        poolManager.take(currency, address(this), amount);
     }
 
     // ============ EigenLayer Operator Simulation ============
@@ -325,7 +480,7 @@ contract ZKJITLiquidityHook is BaseHook {
         uint256 approvals = _countBits(pendingJITs[swapId].validatorConsensus);
         uint256 totalOperators = operators.length;
 
-        return (approvals * 100 >= totalOperators * CONSENSUS_THRESHOLD);
+        return totalOperators > 0 && (approvals * 100 >= totalOperators * CONSENSUS_THRESHOLD);
     }
 
     /**
@@ -335,10 +490,9 @@ contract ZKJITLiquidityHook is BaseHook {
         PendingJIT storage jit = pendingJITs[swapId];
         require(!jit.executed, "Already executed");
 
+        _addJITLiquidity(jit.poolKey, swapId, jit.swapAmount);
         jit.executed = true;
 
-        // Here we would actually provide the liquidity to the pool
-        // For hackathon demo, we'll emit an event
         emit JITExecuted(swapId, PoolId.wrap(bytes32(0)), jit.swapAmount);
     }
 
@@ -375,6 +529,13 @@ contract ZKJITLiquidityHook is BaseHook {
      */
     function getPendingJIT(uint256 swapId) external view returns (PendingJIT memory) {
         return pendingJITs[swapId];
+    }
+
+    /**
+     * @notice Get JIT position details
+     */
+    function getJITPosition(uint256 swapId) external view returns (JITLiquidityPosition memory) {
+        return jitPositions[swapId];
     }
 
     /**
