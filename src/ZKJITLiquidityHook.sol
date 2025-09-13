@@ -91,16 +91,6 @@ contract ZKJITLiquidityHook is BaseHook {
 
     constructor(IPoolManager _poolManager) BaseHook(_poolManager) {}
 
-    function initializeFHE() external {
-        // Initialize FHE constants
-        ENCRYPTED_ZERO = FHE.asEuint128(0);
-        ENCRYPTED_ZERO_32 = FHE.asEuint32(0);
-
-        // Grant contract access to constants
-        FHE.allowThis(ENCRYPTED_ZERO);
-        FHE.allowThis(ENCRYPTED_ZERO_32);
-    }
-
     // ============ Hook Permissions ============
 
     function getHookPermissions() public pure override returns (Hooks.Permissions memory) {
