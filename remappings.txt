@@ -5,8 +5,8 @@
 cofhe-contracts/=lib/cofhe-contracts/contracts/
 @fhenixprotocol/cofhe-contracts/=lib/cofhe-contracts/contracts/
 @fhenixprotocol/cofhe-contracts/=node_modules/@fhenixprotocol/cofhe-contracts/
-@fhenixprotocol/cofhe-mock-contracts/=lib/cofhe-mock-contracts/contracts
-@fhenixprotocol/cofhe-mock-contracts/=node_modules/@fhenixprotocol/cofhe-mock-contracts/
+@fhenixprotocol/cofhe-foundry-mocks/=lib/cofhe-foundry-mocks/src/
+@fhenixprotocol/cofhe-foundry-mocks/=node_modules/@fhenixprotocol/cofhe-foundry-mocks/
 ds-test/=lib/v4-periphery/lib/v4-core/lib/forge-std/lib/ds-test/src/
 erc4626-tests/=lib/v4-periphery/lib/v4-core/lib/openzeppelin-contracts/lib/erc4626-tests/
 forge-gas-snapshot/=lib/v4-periphery/lib/permit2/lib/forge-gas-snapshot/src/

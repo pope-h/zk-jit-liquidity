@@ -24,14 +24,13 @@ import {TickMath} from "v4-core/libraries/TickMath.sol";
 
 import {ZKJITLiquidityHook} from "../src/ZKJITLiquidityHook.sol";
 import "@fhenixprotocol/cofhe-contracts/FHE.sol";
-import {CoFheTest} from "@fhenixprotocol/cofhe-mock-contracts/CoFheTest.sol";
 
 /**
  * @title ZK-JIT Liquidity Tests with FHE & EigenLayer Integration
  * @notice Comprehensive test suite demonstrating the complete ZK-JIT flow with actual liquidity operations
  * @dev This shows the real implementation working end-to-end in tests
  */
-contract ZKJITLiquidityTest is Test, Deployers, CoFheTest {
+contract ZKJITLiquidityTest is Test, Deployers {
     using StateLibrary for IPoolManager;
 
     ZKJITLiquidityHook public hook;
@@ -130,24 +129,24 @@ contract ZKJITLiquidityTest is Test, Deployers, CoFheTest {
         uint8 utype32 = 32; // Type for euint32
         string memory signature = "mock-signature";
 
-        // inEuint128 memory encMinSwap =
-        //     inEuint128({securityZone: securityZone, hash: dataHash, utype: utype128, signature: signature});
-        // inEuint128 memory encMaxLiq = inEuint128({
-        //     securityZone: securityZone,
-        //     hash: uint256(keccak256(abi.encodePacked(maxLiq))),
-        //     utype: utype128,
-        //     signature: signature
-        // });
-        // inEuint32 memory encProfit = inEuint32({
-        //     securityZone: securityZone,
-        //     hash: uint256(keccak256(abi.encodePacked(profitBps))),
-        //     utype: utype32,
-        //     signature: signature
-        // });
+        inEuint128 memory encMinSwap =
+            inEuint128({securityZone: securityZone, hash: dataHash, utype: utype128, signature: signature});
+        inEuint128 memory encMaxLiq = inEuint128({
+            securityZone: securityZone,
+            hash: uint256(keccak256(abi.encodePacked(maxLiq))),
+            utype: utype128,
+            signature: signature
+        });
+        inEuint32 memory encProfit = inEuint32({
+            securityZone: securityZone,
+            hash: uint256(keccak256(abi.encodePacked(profitBps))),
+            utype: utype32,
+            signature: signature
+        });
 
-        InEuint128 memory encMinSwap = createInEuint128(minSwap, LP1);
-        InEuint128 memory encMaxLiq = createInEuint128(maxLiq, LP1);
-        InEuint32 memory encProfit = createInEuint32(profitBps, LP1);
+        // InEuint128 memory encMinSwap = createInEuint128(minSwap, LP1);
+        // InEuint128 memory encMaxLiq = createInEuint128(maxLiq, LP1);
+        // InEuint32 memory encProfit = createInEuint32(profitBps, LP1);
 
         // Configure LP with FHE encryption
         hook.configureLPSettings(key, encMinSwap, encMaxLiq, encProfit);
