@@ -89,7 +89,9 @@ contract ZKJITLiquidityHook is BaseHook {
     event JITLiquidityRemoved(uint256 indexed swapId, uint128 liquidity);
     event OperatorVoted(uint256 indexed swapId, address indexed operator, bool approved);
 
-    constructor(IPoolManager _poolManager) BaseHook(_poolManager) {
+    constructor(IPoolManager _poolManager) BaseHook(_poolManager) {}
+
+    function initializeFHE() external {
         // Initialize FHE constants
         ENCRYPTED_ZERO = FHE.asEuint128(0);
         ENCRYPTED_ZERO_32 = FHE.asEuint32(0);
@@ -98,6 +100,8 @@ contract ZKJITLiquidityHook is BaseHook {
         FHE.allowThis(ENCRYPTED_ZERO);
         FHE.allowThis(ENCRYPTED_ZERO_32);
     }
+
+    // ============ Hook Permissions ============
 
     function getHookPermissions() public pure override returns (Hooks.Permissions memory) {
         return Hooks.Permissions({
