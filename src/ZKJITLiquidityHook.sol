@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: MIT
-pragma solidity ^0.8.24;
+pragma solidity ^0.8.26;
 
 import {BaseHook} from "v4-periphery/src/utils/BaseHook.sol";
 import {Hooks} from "v4-core/libraries/Hooks.sol";
@@ -145,7 +145,10 @@ contract ZKJITLiquidityHook is BaseHook {
     /**
      * @notice Before swap hook - evaluates if JIT should be triggered
      */
-    function beforeSwap(address sender, PoolKey calldata key, SwapParams calldata params, bytes calldata hookData)
+    function beforeSwap(address sender, PoolKey calldata key, SwapParams calldata params, bytes calldata)
+        /**
+         * hookData
+         */
         external
         override
         onlyPoolManager
@@ -159,7 +162,7 @@ contract ZKJITLiquidityHook is BaseHook {
 
         if (jitTriggered) {
             // Create pending JIT request for EigenLayer validation
-            uint256 swapId = _createPendingJIT(key, sender, swapAmount, params);
+            _createPendingJIT(key, sender, swapAmount, params);
 
             // Delay swap execution for operator consensus
             return (this.beforeSwap.selector, BeforeSwapDeltaLibrary.ZERO_DELTA, 0);
@@ -173,12 +176,29 @@ contract ZKJITLiquidityHook is BaseHook {
      * @notice After swap hook - executes JIT liquidity if validated
      */
     function afterSwap(
-        address sender,
+        address,
+        /**
+         * sender
+         */
         PoolKey calldata key,
-        SwapParams calldata params,
-        BalanceDelta delta,
-        bytes calldata hookData
-    ) external override onlyPoolManager returns (bytes4, int128) {
+        SwapParams calldata,
+        /**
+         * params
+         */
+        BalanceDelta,
+        /**
+         * delta
+         */
+        bytes calldata
+    )
+        /**
+         * hookData
+         */
+        external
+        override
+        onlyPoolManager
+        returns (bytes4, int128)
+    {
         // Check for any validated JIT operations ready for execution
         // This would be called in a subsequent transaction after operator consensus
         _executeValidatedJITs(key);
