@@ -121,9 +121,9 @@ contract ZKJITLiquidityHook is BaseHook {
      */
     function configureLPSettings(
         PoolKey calldata poolKey,
-        inEuint128 calldata minSwapSize,
-        inEuint128 calldata maxLiquidity,
-        inEuint32 calldata profitThreshold
+        InEuint128 calldata minSwapSize,
+        InEuint128 calldata maxLiquidity,
+        InEuint32 calldata profitThreshold
     ) external {
         PoolId poolId = poolKey.toId();
 
