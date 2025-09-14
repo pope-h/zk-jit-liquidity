@@ -57,6 +57,10 @@ contract ZKJITLiquidityHook is BaseHook {
 
     // LP configurations per pool per address
     mapping(PoolId => mapping(address => LPConfig)) public lpConfigs;
+    
+    // Track all LPs for a pool to check during evaluation
+    mapping(PoolId => address[]) public poolLPs;
+    mapping(PoolId => mapping(address => bool)) public isLPRegistered;
 
     // Pending JIT operations
     mapping(uint256 => PendingJIT) public pendingJITs;
@@ -89,7 +93,15 @@ contract ZKJITLiquidityHook is BaseHook {
     event JITLiquidityRemoved(uint256 indexed swapId, uint128 liquidity);
     event OperatorVoted(uint256 indexed swapId, address indexed operator, bool approved);
 
-    constructor(IPoolManager _poolManager) BaseHook(_poolManager) {}
+    constructor(IPoolManager _poolManager) BaseHook(_poolManager) {
+        // Initialize FHE constants
+        ENCRYPTED_ZERO = FHE.asEuint128(0);
+        ENCRYPTED_ZERO_32 = FHE.asEuint32(0);
+
+        // Grant contract access to constants
+        FHE.allowThis(ENCRYPTED_ZERO);
+        FHE.allowThis(ENCRYPTED_ZERO_32);
+    }
 
     // ============ Hook Permissions ============
 
@@ -136,6 +148,12 @@ contract ZKJITLiquidityHook is BaseHook {
         lpConfigs[poolId][msg.sender] =
             LPConfig({minSwapSize: encMinSwap, maxLiquidity: encMaxLiq, profitThresholdBps: encProfit, isActive: true});
 
+        // Add LP to pool's LP list if not already registered
+        if (!isLPRegistered[poolId][msg.sender]) {
+            poolLPs[poolId].push(msg.sender);
+            isLPRegistered[poolId][msg.sender] = true;
+        }
+
         // Grant access permissions
         FHE.allowThis(encMinSwap);
         FHE.allowThis(encMaxLiq);
@@ -161,9 +179,6 @@ contract ZKJITLiquidityHook is BaseHook {
      * @notice Before swap hook - evaluates if JIT should be triggered
      */
     function beforeSwap(address sender, PoolKey calldata key, SwapParams calldata params, bytes calldata)
-        /**
-         * hookData
-         */
         external
         override
         onlyPoolManager
@@ -195,23 +210,11 @@ contract ZKJITLiquidityHook is BaseHook {
      */
     function afterSwap(
         address,
-        /**
-         * sender
-         */
         PoolKey calldata key,
         SwapParams calldata,
-        /**
-         * params
-         */
         BalanceDelta,
-        /**
-         * delta
-         */
         bytes calldata
     )
-        /**
-         * hookData
-         */
         external
         override
         onlyPoolManager
@@ -233,16 +236,11 @@ contract ZKJITLiquidityHook is BaseHook {
         euint128 encSwapAmount = FHE.asEuint128(swapAmount);
         FHE.allowThis(encSwapAmount);
 
-        // Check active LPs for this pool (simplified - in production would iterate through registered LPs)
-        // For hackathon, we'll check a few predetermined LP addresses
-        address[3] memory testLPs = [
-            0x1234567890123456789012345678901234567890,
-            0x2345678901234567890123456789012345678901,
-            0x3456789012345678901234567890123456789012
-        ];
-
-        for (uint256 i = 0; i < testLPs.length; i++) {
-            LPConfig memory config = lpConfigs[poolId][testLPs[i]];
+        // Check all registered LPs for this pool
+        address[] memory lps = poolLPs[poolId];
+        
+        for (uint256 i = 0; i < lps.length; i++) {
+            LPConfig memory config = lpConfigs[poolId][lps[i]];
 
             if (config.isActive) {
                 // Private comparison: is swapAmount >= minSwapSize?
@@ -333,14 +331,8 @@ contract ZKJITLiquidityHook is BaseHook {
         // Execute the liquidity addition through pool manager
         try poolManager.modifyLiquidity(key, liquidityParams, "") returns (
             BalanceDelta,
-            /**
-             * delta0
-             */
             BalanceDelta
         ) {
-            /**
-             * delta1
-             */
             // Store the position for later removal
             jitPositions[swapId] = JITLiquidityPosition({
                 swapId: swapId,
@@ -378,19 +370,12 @@ contract ZKJITLiquidityHook is BaseHook {
 
                 try poolManager.modifyLiquidity(key, liquidityParams, "") returns (
                     BalanceDelta,
-                    /**
-                     * delta0
-                     */
                     BalanceDelta
                 ) {
-                    /**
-                     * delta1
-                     */
                     position.isActive = false;
                     emit JITLiquidityRemoved(position.swapId, position.liquidity);
                 } catch {
                     // If removal fails, mark as inactive but continue
-                    // This would have to be configured in afterSwap logic
                     position.isActive = false;
                 }
             }
@@ -537,5 +522,16 @@ contract ZKJITLiquidityHook is BaseHook {
      */
     function isAuthorizedOperator(address operator) external view returns (bool) {
         return authorizedOperators[operator];
+    }
+
+    /**
+     * @notice Reset operators (for testing purposes)
+     */
+    function resetOperators() external {
+        for (uint256 i = 0; i < operators.length; i++) {
+            authorizedOperators[operators[i]] = false;
+            operatorStake[operators[i]] = 0;
+        }
+        delete operators;
     }
 }

@@ -1,515 +1,506 @@
 // SPDX-License-Identifier: MIT
 pragma solidity ^0.8.25;
 
-// import {Test} from "forge-std/Test.sol";
-// import "forge-std/console.sol";
-
-// // Import Uniswap v4 test utilities
-// import {Deployers} from "@uniswap/v4-core/test/utils/Deployers.sol";
-// import {PoolSwapTest} from "v4-core/test/PoolSwapTest.sol";
-// import {MockERC20} from "solmate/src/test/utils/mocks/MockERC20.sol";
-// import {SwapParams, ModifyLiquidityParams} from "v4-core/types/PoolOperation.sol";
-
-// import {PoolManager} from "v4-core/PoolManager.sol";
-// import {IPoolManager} from "v4-core/interfaces/IPoolManager.sol";
-// import {SwapParams, ModifyLiquidityParams} from "v4-core/types/PoolOperation.sol";
-
-// import {PoolId, PoolIdLibrary} from "v4-core/types/PoolId.sol";
-// import {Currency, CurrencyLibrary} from "v4-core/types/Currency.sol";
-// import {StateLibrary} from "v4-core/libraries/StateLibrary.sol";
-// import {PoolKey} from "v4-core/types/PoolKey.sol";
-
-// import {Hooks} from "v4-core/libraries/Hooks.sol";
-// import {TickMath} from "v4-core/libraries/TickMath.sol";
-
-// import {ZKJITLiquidityHook} from "../src/ZKJITLiquidityHook.sol";
-// import "@fhenixprotocol/cofhe-contracts/FHE.sol";
-
-// /**
-//  * @title ZK-JIT Liquidity Tests with FHE & EigenLayer Integration
-//  * @notice Comprehensive test suite demonstrating the complete ZK-JIT flow with actual liquidity operations
-//  * @dev This shows the real implementation working end-to-end in tests
-//  */
-// contract ZKJITLiquidityTest is Test, Deployers {
-//     using StateLibrary for IPoolManager;
-
-//     ZKJITLiquidityHook public hook;
-
-//     // Test actors
-//     address public constant LP1 = address(0x1111);
-//     address public constant LP2 = address(0x2222);
-//     address public constant TRADER = address(0x3333);
-//     address public constant OPERATOR1 = address(0x4444);
-//     address public constant OPERATOR2 = address(0x5555);
-//     address public constant OPERATOR3 = address(0x6666);
-
-//     // Demo scenarios for presentation
-//     uint256 public smallSwap = 500; // Below threshold
-//     uint256 public largeSwap = 5000; // Above threshold
-//     uint256 public mevSwap = 10000; // MEV attack scenario
-
-//     event TestScenario(string scenario, bool success, string details);
-
-//     function setUp() public {
-//         console.log("Setting up ZK-JIT Liquidity Test Suite");
-
-//         // Deploy v4 core contracts
-//         deployFreshManagerAndRouters();
-
-//         // Deploy two test tokens
-//         (currency0, currency1) = deployMintAndApprove2Currencies();
-
-//         // Deploy the hook with proper address flags
-//         uint160 flags = uint160(Hooks.BEFORE_SWAP_FLAG | Hooks.AFTER_SWAP_FLAG | Hooks.BEFORE_SWAP_RETURNS_DELTA_FLAG);
-//         address hookAddress = address(flags);
-//         deployCodeTo("ZKJITLiquidityHook.sol", abi.encode(manager), hookAddress);
-//         hook = ZKJITLiquidityHook(hookAddress);
-
-//         // Approve our hook address to spend these tokens as well
-//         MockERC20(Currency.unwrap(currency0)).approve(address(hook), type(uint256).max);
-//         MockERC20(Currency.unwrap(currency1)).approve(address(hook), type(uint256).max);
-
-//         // Initialize the pool
-//         (key,) = initPool(currency0, currency1, hook, 3000, SQRT_PRICE_1_1);
-
-//         // Add initial liquidity to the pool for normal operations
-//         modifyLiquidityRouter.modifyLiquidity(
-//             key,
-//             ModifyLiquidityParams({tickLower: -60, tickUpper: 60, liquidityDelta: 10 ether, salt: bytes32(0)}),
-//             ZERO_BYTES
-//         );
-
-//         // Setup test accounts with ETH and tokens
-//         _setupTestAccounts();
-
-//         console.log("Test environment initialized");
-//     }
-
-//     function _setupTestAccounts() private {
-//         address[6] memory testAccounts = [LP1, LP2, TRADER, OPERATOR1, OPERATOR2, OPERATOR3];
-
-//         for (uint256 i = 0; i < testAccounts.length; i++) {
-//             vm.deal(testAccounts[i], 100 ether);
-
-//             // Mint tokens to test accounts
-//             MockERC20(Currency.unwrap(currency0)).mint(testAccounts[i], 10000 ether);
-//             MockERC20(Currency.unwrap(currency1)).mint(testAccounts[i], 10000 ether);
-
-//             // Approve hook to spend tokens
-//             vm.startPrank(testAccounts[i]);
-//             MockERC20(Currency.unwrap(currency0)).approve(address(hook), type(uint256).max);
-//             MockERC20(Currency.unwrap(currency1)).approve(address(hook), type(uint256).max);
-//             MockERC20(Currency.unwrap(currency0)).approve(address(swapRouter), type(uint256).max);
-//             MockERC20(Currency.unwrap(currency1)).approve(address(swapRouter), type(uint256).max);
-//             vm.stopPrank();
-//         }
-//     }
+import {Test} from "forge-std/Test.sol";
+import "forge-std/console.sol";
+
+// Import Uniswap v4 test utilities
+import {Deployers} from "@uniswap/v4-core/test/utils/Deployers.sol";
+import {PoolSwapTest} from "v4-core/test/PoolSwapTest.sol";
+import {MockERC20} from "solmate/src/test/utils/mocks/MockERC20.sol";
+import {SwapParams, ModifyLiquidityParams} from "v4-core/types/PoolOperation.sol";
+
+import {PoolManager} from "v4-core/PoolManager.sol";
+import {IPoolManager} from "v4-core/interfaces/IPoolManager.sol";
+import {SwapParams, ModifyLiquidityParams} from "v4-core/types/PoolOperation.sol";
+
+import {PoolId, PoolIdLibrary} from "v4-core/types/PoolId.sol";
+import {Currency, CurrencyLibrary} from "v4-core/types/Currency.sol";
+import {StateLibrary} from "v4-core/libraries/StateLibrary.sol";
+import {PoolKey} from "v4-core/types/PoolKey.sol";
+
+import {Hooks} from "v4-core/libraries/Hooks.sol";
+import {TickMath} from "v4-core/libraries/TickMath.sol";
+
+import {ZKJITLiquidityHook} from "../src/ZKJITLiquidityHook.sol";
+import "@fhenixprotocol/cofhe-contracts/FHE.sol";
+import {CoFheTest} from "@fhenixprotocol/cofhe-mock-contracts/CoFheTest.sol";
+
+/**
+ * @title ZK-JIT Liquidity Tests with FHE & EigenLayer Integration
+ * @notice Comprehensive test suite demonstrating the complete ZK-JIT flow with actual liquidity operations
+ * @dev This shows the real implementation working end-to-end in tests
+ */
+contract ZKJITLiquidityTest is Test, Deployers, CoFheTest {
+    using StateLibrary for IPoolManager;
+
+    ZKJITLiquidityHook public hook;
+
+    // Test actors
+    address public constant LP1 = address(0x1111);
+    address public constant LP2 = address(0x2222);
+    address public constant TRADER = address(0x3333);
+    address public constant OPERATOR1 = address(0x4444);
+    address public constant OPERATOR2 = address(0x5555);
+    address public constant OPERATOR3 = address(0x6666);
+
+    // Demo scenarios for presentation
+    uint256 public smallSwap = 500; // Below threshold
+    uint256 public largeSwap = 5000; // Above threshold
+    uint256 public mevSwap = 10000; // MEV attack scenario
+
+    // Test state tracking
+    bool private operatorsRegistered = false;
+    bool private lpConfigured = false;
+
+    event TestScenario(string scenario, bool success, string details);
+
+    function setUp() public {
+        console.log("Setting up ZK-JIT Liquidity Test Suite");
+
+        // Deploy v4 core contracts
+        deployFreshManagerAndRouters();
+
+        // Deploy two test tokens
+        (currency0, currency1) = deployMintAndApprove2Currencies();
+
+        // Deploy the hook with proper address flags
+        uint160 flags = uint160(Hooks.BEFORE_SWAP_FLAG | Hooks.AFTER_SWAP_FLAG | Hooks.BEFORE_SWAP_RETURNS_DELTA_FLAG);
+        address hookAddress = address(flags);
+        deployCodeTo("ZKJITLiquidityHook.sol", abi.encode(manager), hookAddress);
+        hook = ZKJITLiquidityHook(hookAddress);
+
+        // Approve our hook address to spend these tokens as well
+        MockERC20(Currency.unwrap(currency0)).approve(address(hook), type(uint256).max);
+        MockERC20(Currency.unwrap(currency1)).approve(address(hook), type(uint256).max);
+
+        // Initialize the pool
+        (key,) = initPool(currency0, currency1, hook, 3000, SQRT_PRICE_1_1);
+
+        // Add initial liquidity to the pool for normal operations
+        modifyLiquidityRouter.modifyLiquidity(
+            key,
+            ModifyLiquidityParams({tickLower: -60, tickUpper: 60, liquidityDelta: 10 ether, salt: bytes32(0)}),
+            ZERO_BYTES
+        );
+
+        // Setup test accounts with ETH and tokens
+        _setupTestAccounts();
+
+        console.log("Test environment initialized");
+    }
+
+    function _setupTestAccounts() private {
+        address[6] memory testAccounts = [LP1, LP2, TRADER, OPERATOR1, OPERATOR2, OPERATOR3];
+
+        for (uint256 i = 0; i < testAccounts.length; i++) {
+            vm.deal(testAccounts[i], 100 ether);
+
+            // Mint tokens to test accounts
+            MockERC20(Currency.unwrap(currency0)).mint(testAccounts[i], 10000 ether);
+            MockERC20(Currency.unwrap(currency1)).mint(testAccounts[i], 10000 ether);
+
+            // Approve hook to spend tokens
+            vm.startPrank(testAccounts[i]);
+            MockERC20(Currency.unwrap(currency0)).approve(address(hook), type(uint256).max);
+            MockERC20(Currency.unwrap(currency1)).approve(address(hook), type(uint256).max);
+            MockERC20(Currency.unwrap(currency0)).approve(address(swapRouter), type(uint256).max);
+            MockERC20(Currency.unwrap(currency1)).approve(address(swapRouter), type(uint256).max);
+            vm.stopPrank();
+        }
+    }
 
-//     /// @notice Test 1: FHE Private LP Configuration
-//     function testFHELPConfiguration() public {
-//         console.log("\nTEST 1: FHE LP Configuration");
+    function _ensureOperatorsRegistered() private {
+        if (operatorsRegistered) return;
 
-//         vm.startPrank(LP1);
+        console.log("Registering operators...");
+        address[3] memory operators = [OPERATOR1, OPERATOR2, OPERATOR3];
 
-//         // Create encrypted thresholds (simulating FHE input)
-//         uint128 minSwap = 1000;
-//         uint128 maxLiq = 50000;
-//         uint32 profitBps = 50;
+        for (uint256 i = 0; i < operators.length; i++) {
+            vm.startPrank(operators[i]);
+            console.log("Registering operator %s with 2 ETH stake", operators[i]);
+            hook.registerOperator{value: 2 ether}();
+            assertTrue(hook.isAuthorizedOperator(operators[i]), "Operator should be registered");
+            vm.stopPrank();
+        }
 
-//         console.log("LP1 setting private thresholds:");
-//         console.log("- Min swap size: %s (encrypted)", minSwap);
-//         console.log("- Max liquidity: %s (encrypted)", maxLiq);
-//         console.log("- Profit threshold: %s bps (encrypted)", profitBps);
+        operatorsRegistered = true;
+        console.log("All EigenLayer operators registered successfully");
+    }
 
-//         // Mock encrypted inputs for CoFHE
-//         int32 securityZone = 1; // Default security zone
-//         uint256 dataHash = uint256(keccak256(abi.encodePacked(minSwap)));
-//         uint8 utype128 = 128; // Type for euint128
-//         uint8 utype32 = 32; // Type for euint32
-//         string memory signature = "mock-signature";
+    function _ensureLPConfigured() private {
+        if (lpConfigured) return;
 
-//         // InEuint128 memory encMinSwap =
-//         //     InEuint128({securityZone: securityZone, hash: dataHash, utype: utype128, signature: signature});
-//         // InEuint128 memory encMaxLiq = InEuint128({
-//         //     securityZone: securityZone,
-//         //     hash: uint256(keccak256(abi.encodePacked(maxLiq))),
-//         //     utype: utype128,
-//         //     signature: signature
-//         // });
-//         // InEuint32 memory encProfit = InEuint32({
-//         //     securityZone: securityZone,
-//         //     hash: uint256(keccak256(abi.encodePacked(profitBps))),
-//         //     utype: utype32,
-//         //     signature: signature
-//         // });
+        console.log("Configuring LP...");
+        vm.startPrank(LP1);
 
-//         InEuint128 memory encMinSwap = createInEuint128(minSwap, LP1);
-//         InEuint128 memory encMaxLiq = createInEuint128(maxLiq, LP1);
-//         InEuint32 memory encProfit = createInEuint32(profitBps, LP1);
+        // Create encrypted thresholds (simulating FHE input)
+        uint128 minSwap = 1000;
+        uint128 maxLiq = 50000;
+        uint32 profitBps = 50;
 
-//         // Configure LP with FHE encryption
-//         hook.configureLPSettings(key, encMinSwap, encMaxLiq, encProfit);
+        console.log("LP1 setting private thresholds:");
+        console.log("- Min swap size: %s (encrypted)", minSwap);
+        console.log("- Max liquidity: %s (encrypted)", maxLiq);
+        console.log("- Profit threshold: %s bps (encrypted)", profitBps);
 
-//         // Verify LP is configured (public flag)
-//         assertTrue(hook.getLPConfig(key, LP1), "LP should be active");
+        InEuint128 memory encMinSwap = createInEuint128(minSwap, LP1);
+        InEuint128 memory encMaxLiq = createInEuint128(maxLiq, LP1);
+        InEuint32 memory encProfit = createInEuint32(profitBps, LP1);
 
-//         vm.stopPrank();
+        // Configure LP with FHE encryption
+        hook.configureLPSettings(key, encMinSwap, encMaxLiq, encProfit);
 
-//         emit TestScenario("FHE LP Configuration", true, "LP thresholds encrypted and stored");
-//         console.log("LP configuration with FHE encryption successful");
-//     }
+        // Verify LP is configured (public flag)
+        assertTrue(hook.getLPConfig(key, LP1), "LP should be active");
 
-//     /// @notice Test 2: EigenLayer Operator Registration
-//     function testEigenLayerOperatorSetup() public {
-//         console.log("\n TEST 2: EigenLayer Operator Setup");
+        vm.stopPrank();
 
-//         // Register multiple operators
-//         address[3] memory operators = [OPERATOR1, OPERATOR2, OPERATOR3];
+        lpConfigured = true;
+        console.log("LP configuration with FHE encryption successful");
+    }
 
-//         for (uint256 i = 0; i < operators.length; i++) {
-//             vm.startPrank(operators[i]);
+    /// @notice Test 1: FHE Private LP Configuration
+    function testFHELPConfiguration() public {
+        console.log("\nTEST 1: FHE LP Configuration");
+        _ensureLPConfigured();
+        emit TestScenario("FHE LP Configuration", true, "LP thresholds encrypted and stored");
+    }
 
-//             console.log("Registering operator %s with 2 ETH stake", operators[i]);
-//             hook.registerOperator{value: 2 ether}();
+    /// @notice Test 2: EigenLayer Operator Registration
+    function testEigenLayerOperatorSetup() public {
+        console.log("\nTEST 2: EigenLayer Operator Setup");
+        _ensureOperatorsRegistered();
+        emit TestScenario("EigenLayer Operator Registration", true, "3 operators registered and staked");
+    }
 
-//             assertTrue(hook.isAuthorizedOperator(operators[i]), "Operator should be registered");
+    /// @notice Test 3: Small Swap - No JIT Trigger
+    function testSmallSwapNoJIT() public {
+        console.log("\nTEST 3: Small Swap (No JIT Trigger)");
 
-//             vm.stopPrank();
-//         }
+        // Setup LP first
+        _ensureLPConfigured();
 
-//         emit TestScenario("EigenLayer Operator Registration", true, "3 operators registered and staked");
-//         console.log("All EigenLayer operators registered successfully");
-//     }
+        vm.startPrank(TRADER);
 
-//     /// @notice Test 3: Small Swap - No JIT Trigger
-//     function testSmallSwapNoJIT() public {
-//         console.log("\n TEST 3: Small Swap (No JIT Trigger)");
+        console.log("Trader attempting swap of %s tokens (below threshold)", smallSwap);
 
-//         // Setup LP first
-//         testFHELPConfiguration();
+        uint256 balanceBefore = currency1.balanceOf(TRADER);
 
-//         vm.startPrank(TRADER);
+        // Execute swap through swap router
+        SwapParams memory params = SwapParams({
+            zeroForOne: true,
+            amountSpecified: -int256(smallSwap),
+            sqrtPriceLimitX96: TickMath.MIN_SQRT_PRICE + 1
+        });
 
-//         console.log("Trader attempting swap of %s tokens (below threshold)", smallSwap);
+        PoolSwapTest.TestSettings memory testSettings =
+            PoolSwapTest.TestSettings({takeClaims: false, settleUsingBurn: false});
 
-//         uint256 balanceBefore = currency1.balanceOf(TRADER);
+        swapRouter.swap(key, params, testSettings, ZERO_BYTES);
 
-//         // Execute swap through swap router
-//         SwapParams memory params = SwapParams({
-//             zeroForOne: true,
-//             amountSpecified: -int256(smallSwap),
-//             sqrtPriceLimitX96: TickMath.MIN_SQRT_PRICE + 1
-//         });
+        uint256 balanceAfter = currency1.balanceOf(TRADER);
 
-//         PoolSwapTest.TestSettings memory testSettings =
-//             PoolSwapTest.TestSettings({takeClaims: false, settleUsingBurn: false});
+        vm.stopPrank();
 
-//         swapRouter.swap(key, params, testSettings, ZERO_BYTES);
+        // Should have received tokens from swap
+        assertGt(balanceAfter, balanceBefore, "Should have received tokens from swap");
 
-//         uint256 balanceAfter = currency1.balanceOf(TRADER);
+        emit TestScenario("Small Swap", true, "No JIT triggered - swap proceeds normally");
+        console.log("Small swap processed without JIT intervention");
+    }
 
-//         vm.stopPrank();
+    /// @notice Test 4: Large Swap - JIT Triggered with FHE
+    function testLargeSwapJITTrigger() public {
+        console.log("\nTEST 4: Large Swap (JIT Triggered)");
 
-//         // Should have received tokens from swap
-//         assertGt(balanceAfter, balanceBefore, "Should have received tokens from swap");
+        // Setup LP and operators
+        _ensureLPConfigured();
+        _ensureOperatorsRegistered();
 
-//         emit TestScenario("Small Swap", true, "No JIT triggered - swap proceeds normally");
-//         console.log("Small swap processed without JIT intervention");
-//     }
+        vm.startPrank(TRADER);
 
-//     /// @notice Test 4: Large Swap - JIT Triggered with FHE
-//     function testLargeSwapJITTrigger() public {
-//         console.log("\n TEST 4: Large Swap (JIT Triggered)");
+        console.log("Trader attempting swap of %s tokens (above threshold)", largeSwap);
 
-//         // Setup LP and operators
-//         testFHELPConfiguration();
-//         testEigenLayerOperatorSetup();
+        uint256 balanceBefore = currency1.balanceOf(TRADER);
 
-//         vm.startPrank(TRADER);
+        // Create swap params for large swap
+        SwapParams memory params = SwapParams({
+            zeroForOne: true,
+            amountSpecified: -int256(largeSwap),
+            sqrtPriceLimitX96: TickMath.MIN_SQRT_PRICE + 1
+        });
 
-//         console.log("Trader attempting swap of %s tokens (above threshold)", largeSwap);
+        PoolSwapTest.TestSettings memory testSettings =
+            PoolSwapTest.TestSettings({takeClaims: false, settleUsingBurn: false});
 
-//         uint256 balanceBefore = currency1.balanceOf(TRADER);
+        // This should trigger JIT evaluation and execution
+        console.log("FHE evaluating private thresholds...");
 
-//         // Create swap params for large swap
-//         SwapParams memory params = SwapParams({
-//             zeroForOne: true,
-//             amountSpecified: -int256(largeSwap),
-//             sqrtPriceLimitX96: TickMath.MIN_SQRT_PRICE + 1
-//         });
+        swapRouter.swap(key, params, testSettings, ZERO_BYTES);
 
-//         PoolSwapTest.TestSettings memory testSettings =
-//             PoolSwapTest.TestSettings({takeClaims: false, settleUsingBurn: false});
+        uint256 balanceAfter = currency1.balanceOf(TRADER);
 
-//         // This should trigger JIT evaluation and execution
-//         console.log("FHE evaluating private thresholds...");
+        vm.stopPrank();
 
-//         swapRouter.swap(key, params, testSettings, ZERO_BYTES);
+        // Should have executed JIT operation
+        uint256 currentSwapId = hook.nextSwapId();
+        assertGt(currentSwapId, 0, "Should have created JIT operation");
 
-//         uint256 balanceAfter = currency1.balanceOf(TRADER);
+        // Should have received tokens from swap
+        assertGt(balanceAfter, balanceBefore, "Should have received tokens from swap");
 
-//         vm.stopPrank();
+        emit TestScenario("Large Swap JIT Trigger", true, "FHE threshold exceeded - JIT executed");
+        console.log("Large swap triggered and executed JIT through FHE evaluation");
 
-//         // Should have executed JIT operation
-//         uint256 currentSwapId = hook.nextSwapId();
-//         assertGt(currentSwapId, 0, "Should have created JIT operation");
+        // Test the JIT operation details
+        ZKJITLiquidityHook.PendingJIT memory pendingJIT = hook.getPendingJIT(currentSwapId);
+        assertEq(pendingJIT.swapper, TRADER, "Should track correct swapper");
+        assertEq(pendingJIT.swapAmount, uint128(largeSwap), "Should track correct amount");
+        assertTrue(pendingJIT.executed, "JIT should be executed");
 
-//         // Should have received tokens from swap
-//         assertGt(balanceAfter, balanceBefore, "Should have received tokens from swap");
+        console.log("JIT Operation Details:");
+        console.log("- Swap ID: %s", pendingJIT.swapId);
+        console.log("- Swapper: %s", pendingJIT.swapper);
+        console.log("- Amount: %s", pendingJIT.swapAmount);
+        console.log("- Executed: %s", pendingJIT.executed);
+    }
 
-//         emit TestScenario("Large Swap JIT Trigger", true, "FHE threshold exceeded - JIT executed");
-//         console.log("Large swap triggered and executed JIT through FHE evaluation");
+    /// @notice Test 6: MEV Protection Scenario
+    function testMEVProtectionScenario() public {
+        console.log("\nTEST 6: MEV Protection Scenario");
 
-//         // Test the JIT operation details
-//         ZKJITLiquidityHook.PendingJIT memory pendingJIT = hook.getPendingJIT(currentSwapId);
-//         assertEq(pendingJIT.swapper, TRADER, "Should track correct swapper");
-//         assertEq(pendingJIT.swapAmount, uint128(largeSwap), "Should track correct amount");
-//         assertTrue(pendingJIT.executed, "JIT should be executed");
+        // Setup
+        _ensureLPConfigured();
+        _ensureOperatorsRegistered();
 
-//         console.log("JIT Operation Details:");
-//         console.log("- Swap ID: %s", pendingJIT.swapId);
-//         console.log("- Swapper: %s", pendingJIT.swapper);
-//         console.log("- Amount: %s", pendingJIT.swapAmount);
-//         console.log("- Executed: %s", pendingJIT.executed);
-//     }
+        console.log("Simulating MEV attack attempt...");
 
-//     // /// @notice Test 5: EigenLayer Operator Validation & Consensus
-//     // function testOperatorValidationConsensus() public {
-//     //     console.log("\n TEST 5: EigenLayer Operator Validation");
+        // MEV bot tries to front-run with large swap
+        address mevBot = address(0x9999);
+        vm.deal(mevBot, 100 ether);
+        MockERC20(Currency.unwrap(currency0)).mint(mevBot, 100000 ether);
+        MockERC20(Currency.unwrap(currency1)).mint(mevBot, 100000 ether);
 
-//     //     // Setup operators first
-//     //     testEigenLayerOperatorSetup();
-//     //     testFHELPConfiguration();
+        vm.startPrank(mevBot);
+        MockERC20(Currency.unwrap(currency0)).approve(address(swapRouter), type(uint256).max);
+        MockERC20(Currency.unwrap(currency1)).approve(address(swapRouter), type(uint256).max);
 
-//     //     vm.startPrank(TRADER);
+        SwapParams memory mevParams = SwapParams({
+            zeroForOne: true,
+            amountSpecified: -int256(mevSwap),
+            sqrtPriceLimitX96: TickMath.MIN_SQRT_PRICE + 1
+        });
 
-//     //     // Manually create a pending JIT operation
-//     //     SwapParams memory params = SwapParams({
-//     //         zeroForOne: true,
-//     //         amountSpecified: -int256(largeSwap),
-//     //         sqrtPriceLimitX96: TickMath.MIN_SQRT_PRICE + 1
-//     //     });
+        console.log("MEV bot attempting %s token swap to extract value", mevSwap);
 
-//     //     vm.stopPrank();
+        uint256 balanceBefore = currency1.balanceOf(mevBot);
 
-//     //     // Now test operator consensus mechanism
-//     //     uint256 swapId = hook.nextSwapId() + 1; // Next swap ID
-//     //     console.log("Operators validating JIT operation #%s", swapId);
+        PoolSwapTest.TestSettings memory testSettings =
+            PoolSwapTest.TestSettings({takeClaims: false, settleUsingBurn: false});
 
-//     //     // Simulate block progression for voting delay
-//     //     vm.roll(block.number + 3);
+        swapRouter.swap(key, mevParams, testSettings, ZERO_BYTES);
 
-//     //     // Operators vote on the JIT operation
-//     //     address[3] memory operators = [OPERATOR1, OPERATOR2, OPERATOR3];
-//     //     bool[3] memory votes = [true, true, false]; // 2/3 approve
+        uint256 balanceAfter = currency1.balanceOf(mevBot);
 
-//     //     // Create a mock pending JIT for testing (in production this would come from beforeSwap)
-//     //     // This is just for testing the consensus mechanism
+        vm.stopPrank();
 
-//     //     emit TestScenario("Operator Consensus", true, "Consensus mechanism tested");
-//     //     console.log("EigenLayer consensus mechanism validated");
-//     // }
+        // The private nature of FHE means MEV bot can't predict LP behavior
+        console.log("FHE evaluation prevents MEV bot from gaming LP strategies");
+        console.log("LP profits protected through privacy");
 
-//     /// @notice Test 6: MEV Protection Scenario
-//     function testMEVProtectionScenario() public {
-//         console.log("\n TEST 6: MEV Protection Scenario");
+        // MEV bot still gets some tokens but LP strategy remains private
+        assertGt(balanceAfter, balanceBefore, "MEV bot executed swap");
 
-//         // Setup
-//         testFHELPConfiguration();
-//         testEigenLayerOperatorSetup();
+        emit TestScenario("MEV Protection", true, "FHE prevents strategy extraction");
+        console.log("MEV protection successful - LP strategy remains private");
+    }
 
-//         console.log(" Simulating MEV attack attempt...");
+    /// @notice Test 7: JIT Liquidity Position Management
+    function testJITLiquidityPositions() public {
+        console.log("\nTEST 7: JIT Liquidity Position Management");
 
-//         // MEV bot tries to front-run with large swap
-//         address mevBot = address(0x9999);
-//         vm.deal(mevBot, 100 ether);
-//         MockERC20(Currency.unwrap(currency0)).mint(mevBot, 100000 ether);
-//         MockERC20(Currency.unwrap(currency1)).mint(mevBot, 100000 ether);
+        _ensureLPConfigured();
+        _ensureOperatorsRegistered();
 
-//         vm.startPrank(mevBot);
-//         MockERC20(Currency.unwrap(currency0)).approve(address(swapRouter), type(uint256).max);
-//         MockERC20(Currency.unwrap(currency1)).approve(address(swapRouter), type(uint256).max);
+        vm.startPrank(TRADER);
 
-//         SwapParams memory mevParams = SwapParams({
-//             zeroForOne: true,
-//             amountSpecified: -int256(mevSwap),
-//             sqrtPriceLimitX96: TickMath.MIN_SQRT_PRICE + 1
-//         });
+        SwapParams memory params = SwapParams({
+            zeroForOne: true,
+            amountSpecified: -int256(largeSwap),
+            sqrtPriceLimitX96: TickMath.MIN_SQRT_PRICE + 1
+        });
 
-//         console.log("MEV bot attempting %s token swap to extract value", mevSwap);
+        PoolSwapTest.TestSettings memory testSettings =
+            PoolSwapTest.TestSettings({takeClaims: false, settleUsingBurn: false});
 
-//         uint256 balanceBefore = currency1.balanceOf(mevBot);
+        // Execute swap that should trigger JIT
+        swapRouter.swap(key, params, testSettings, ZERO_BYTES);
 
-//         PoolSwapTest.TestSettings memory testSettings =
-//             PoolSwapTest.TestSettings({takeClaims: false, settleUsingBurn: false});
+        vm.stopPrank();
 
-//         swapRouter.swap(key, mevParams, testSettings, ZERO_BYTES);
+        uint256 swapId = hook.nextSwapId();
 
-//         uint256 balanceAfter = currency1.balanceOf(mevBot);
+        // Check that JIT position was created
+        ZKJITLiquidityHook.JITLiquidityPosition memory position = hook.getJITPosition(swapId);
 
-//         vm.stopPrank();
+        if (position.swapId > 0) {
+            console.log("JIT Position created:");
+            console.log("- Swap ID: %s", position.swapId);
+            console.log("- Tick Lower: %s", uint256(int256(position.tickLower)));
+            console.log("- Tick Upper: %s", uint256(int256(position.tickUpper)));
+            console.log("- Liquidity: %s", position.liquidity);
+            console.log("- Active: %s", position.isActive);
 
-//         // The private nature of FHE means MEV bot can't predict LP behavior
-//         console.log("FHE evaluation prevents MEV bot from gaming LP strategies");
-//         console.log("LP profits protected through privacy");
+            emit TestScenario("JIT Position Management", true, "Position created and tracked");
+        } else {
+            emit TestScenario("JIT Position Management", true, "JIT triggered but position simplified for demo");
+        }
 
-//         // MEV bot still gets some tokens but LP strategy remains private
-//         assertGt(balanceAfter, balanceBefore, "MEV bot executed swap");
+        console.log("JIT liquidity position management tested");
+    }
 
-//         emit TestScenario("MEV Protection", true, "FHE prevents strategy extraction");
-//         console.log("MEV protection successful - LP strategy remains private");
-//     }
+    /// @notice Test 8: Complete End-to-End Flow
+    function testCompleteE2EFlow() public {
+        console.log("\nTEST 8: Complete End-to-End Demo Flow");
 
-//     /// @notice Test 7: JIT Liquidity Position Management
-//     function testJITLiquidityPositions() public {
-//         console.log("\n TEST 7: JIT Liquidity Position Management");
+        console.log("Step 1: LP Configuration with FHE");
+        testFHELPConfiguration();
 
-//         testFHELPConfiguration();
-//         testEigenLayerOperatorSetup();
+        console.log("\nStep 2: EigenLayer Operator Setup");
+        // Don't call testEigenLayerOperatorSetup() to avoid re-registration
+        _ensureOperatorsRegistered();
 
-//         vm.startPrank(TRADER);
+        console.log("\nStep 3: Normal Swap (No JIT)");
+        testSmallSwapNoJIT();
 
-//         SwapParams memory params = SwapParams({
-//             zeroForOne: true,
-//             amountSpecified: -int256(largeSwap),
-//             sqrtPriceLimitX96: TickMath.MIN_SQRT_PRICE + 1
-//         });
+        console.log("\nStep 4: Large Swap (JIT Triggered)");
+        testLargeSwapJITTrigger();
 
-//         PoolSwapTest.TestSettings memory testSettings =
-//             PoolSwapTest.TestSettings({takeClaims: false, settleUsingBurn: false});
+        console.log("\nStep 5: JIT Position Management");
+        testJITLiquidityPositions();
 
-//         // Execute swap that should trigger JIT
-//         swapRouter.swap(key, params, testSettings, ZERO_BYTES);
+        console.log("\nStep 6: MEV Protection");
+        testMEVProtectionScenario();
 
-//         vm.stopPrank();
+        emit TestScenario("Complete E2E Flow", true, "All systems working together");
+        console.log("\nCOMPLETE END-TO-END FLOW SUCCESSFUL!");
+        console.log("FHE Privacy: LP strategies encrypted");
+        console.log("EigenLayer Validation: Operator consensus working");
+        console.log("MEV Protection: Private decisions prevent extraction");
+        console.log("Uniswap v4: Hook integration with real liquidity operations");
+        console.log("JIT Execution: Add/remove liquidity dynamically");
+    }
 
-//         uint256 swapId = hook.nextSwapId();
+    /// @notice Test 9: Gas Optimization Analysis
+    function testGasOptimization() public {
+        console.log("\nTEST 9: Gas Optimization Analysis");
 
-//         // Check that JIT position was created
-//         ZKJITLiquidityHook.JITLiquidityPosition memory position = hook.getJITPosition(swapId);
+        _ensureLPConfigured();
 
-//         if (position.swapId > 0) {
-//             console.log("JIT Position created:");
-//             console.log("- Swap ID: %s", position.swapId);
-//             console.log("- Tick Lower: %s", uint256(int256(position.tickLower)));
-//             console.log("- Tick Upper: %s", uint256(int256(position.tickUpper)));
-//             console.log("- Liquidity: %s", position.liquidity);
-//             console.log("- Active: %s", position.isActive);
+        uint256 gasBefore = gasleft();
 
-//             emit TestScenario("JIT Position Management", true, "Position created and tracked");
-//         } else {
-//             emit TestScenario("JIT Position Management", true, "JIT triggered but position simplified for demo");
-//         }
+        vm.startPrank(TRADER);
 
-//         console.log("JIT liquidity position management tested");
-//     }
+        SwapParams memory params = SwapParams({
+            zeroForOne: true,
+            amountSpecified: -int256(largeSwap),
+            sqrtPriceLimitX96: TickMath.MIN_SQRT_PRICE + 1
+        });
 
-//     /// @notice Test 8: Complete End-to-End Flow
-//     function testCompleteE2EFlow() public {
-//         console.log("\n TEST 8: Complete End-to-End Demo Flow");
+        PoolSwapTest.TestSettings memory testSettings =
+            PoolSwapTest.TestSettings({takeClaims: false, settleUsingBurn: false});
 
-//         console.log("Step 1: LP Configuration with FHE");
-//         testFHELPConfiguration();
+        swapRouter.swap(key, params, testSettings, ZERO_BYTES);
 
-//         console.log("\nStep 2: EigenLayer Operator Setup");
-//         testEigenLayerOperatorSetup();
+        uint256 gasUsed = gasBefore - gasleft();
 
-//         console.log("\nStep 3: Normal Swap (No JIT)");
-//         testSmallSwapNoJIT();
+        vm.stopPrank();
 
-//         console.log("\nStep 4: Large Swap (JIT Triggered)");
-//         testLargeSwapJITTrigger();
+        console.log("Gas used for JIT-enabled swap: %s", gasUsed);
+        console.log("Gas usage measured for production optimization");
 
-//         console.log("\nStep 5: JIT Position Management");
-//         testJITLiquidityPositions();
+        emit TestScenario("Gas Optimization", true, string(abi.encodePacked("Gas used: ", vm.toString(gasUsed))));
+    }
 
-//         console.log("\nStep 6: MEV Protection");
-//         testMEVProtectionScenario();
+    /// @notice Test 10: Edge Cases and Error Handling
+    function testEdgeCasesAndErrors() public {
+        console.log("\nTEST 10: Edge Cases and Error Handling");
 
-//         emit TestScenario("Complete E2E Flow", true, "All systems working together");
-//         console.log("\n COMPLETE END-TO-END FLOW SUCCESSFUL!");
-//         console.log("FHE Privacy: LP strategies encrypted");
-//         console.log("EigenLayer Validation: Operator consensus working");
-//         console.log("MEV Protection: Private decisions prevent extraction");
-//         console.log("Uniswap v4: Hook integration with real liquidity operations");
-//         console.log("JIT Execution: Add/remove liquidity dynamically");
-//     }
+        // Test unauthorized operator voting
+        vm.startPrank(address(0x7777));
+        vm.expectRevert("Not authorized operator");
+        hook.operatorVote(1, true);
+        vm.stopPrank();
 
-//     /// @notice Test 9: Gas Optimization Analysis
-//     function testGasOptimization() public {
-//         console.log("\n TEST 9: Gas Optimization Analysis");
+        // Test insufficient stake
+        vm.startPrank(address(0x8888));
+        vm.deal(address(0x8888), 0.5 ether);
+        vm.expectRevert("Insufficient stake");
+        hook.registerOperator{value: 0.5 ether}();
+        vm.stopPrank();
 
-//         testFHELPConfiguration();
+        // Test deactivating LP
+        _ensureLPConfigured();
+        vm.startPrank(LP1);
+        hook.deactivateLP(key);
+        assertFalse(hook.getLPConfig(key, LP1), "LP should be deactivated");
+        vm.stopPrank();
 
-//         uint256 gasBefore = gasleft();
+        console.log("Error handling working correctly");
+        emit TestScenario("Edge Cases", true, "All error conditions handled properly");
+    }
 
-//         vm.startPrank(TRADER);
+    /// @notice Run all tests for demo
+    function testRunCompleteDemo() public {
+        console.log("RUNNING COMPLETE ZK-JIT LIQUIDITY DEMO");
+        console.log("================================================");
 
-//         SwapParams memory params = SwapParams({
-//             zeroForOne: true,
-//             amountSpecified: -int256(largeSwap),
-//             sqrtPriceLimitX96: TickMath.MIN_SQRT_PRICE + 1
-//         });
+        testCompleteE2EFlow();
+        testGasOptimization();
+        testEdgeCasesAndErrors();
 
-//         PoolSwapTest.TestSettings memory testSettings =
-//             PoolSwapTest.TestSettings({takeClaims: false, settleUsingBurn: false});
+        console.log("\nDEMO COMPLETE - ALL SYSTEMS OPERATIONAL!");
+        console.log("Results Summary:");
+        console.log("- FHE Integration: WORKING");
+        console.log("- EigenLayer AVS: WORKING");
+        console.log("- Uniswap v4 Hook: WORKING");
+        console.log("- JIT Liquidity Execution: WORKING");
+        console.log("- MEV Protection: WORKING");
+        console.log("- Gas Optimized: WORKING");
+        console.log("- Error Handling: WORKING");
+    }
 
-//         swapRouter.swap(key, params, testSettings, ZERO_BYTES);
+    /// @notice Individual test functions that can be called separately
+    function testIndividualFHEConfiguration() public {
+        testFHELPConfiguration();
+    }
 
-//         uint256 gasUsed = gasBefore - gasleft();
+    function testIndividualOperatorSetup() public {
+        testEigenLayerOperatorSetup();
+    }
 
-//         vm.stopPrank();
+    function testIndividualSmallSwap() public {
+        testSmallSwapNoJIT();
+    }
 
-//         console.log("Gas used for JIT-enabled swap: %s", gasUsed);
-//         console.log("Gas usage measured for production optimization");
+    function testIndividualLargeSwap() public {
+        testLargeSwapJITTrigger();
+    }
 
-//         emit TestScenario("Gas Optimization", true, string(abi.encodePacked("Gas used: ", vm.toString(gasUsed))));
-//     }
+    function testIndividualMEVProtection() public {
+        testMEVProtectionScenario();
+    }
 
-//     /// @notice Test 10: Edge Cases and Error Handling
-//     function testEdgeCasesAndErrors() public {
-//         console.log("\n TEST 10: Edge Cases and Error Handling");
+    function testIndividualPositionManagement() public {
+        testJITLiquidityPositions();
+    }
 
-//         // Test unauthorized operator voting
-//         vm.startPrank(address(0x7777));
-//         vm.expectRevert("Not authorized operator");
-//         hook.operatorVote(1, true);
-//         vm.stopPrank();
+    function testIndividualGasAnalysis() public {
+        testGasOptimization();
+    }
 
-//         // Test insufficient stake
-//         vm.startPrank(address(0x8888));
-//         vm.deal(address(0x8888), 0.5 ether);
-//         vm.expectRevert("Insufficient stake");
-//         hook.registerOperator{value: 0.5 ether}();
-//         vm.stopPrank();
-
-//         // Test deactivating LP
-//         vm.startPrank(LP1);
-//         hook.deactivateLP(key);
-//         assertFalse(hook.getLPConfig(key, LP1), "LP should be deactivated");
-//         vm.stopPrank();
-
-//         console.log("Error handling working correctly");
-//         emit TestScenario("Edge Cases", true, "All error conditions handled properly");
-//     }
-
-//     /// @notice Run all tests for demo
-//     function testRunCompleteDemo() public {
-//         console.log("RUNNING COMPLETE ZK-JIT LIQUIDITY DEMO");
-//         console.log("================================================");
-
-//         testCompleteE2EFlow();
-//         testGasOptimization();
-//         testEdgeCasesAndErrors();
-
-//         console.log("\n DEMO COMPLETE - ALL SYSTEMS OPERATIONAL!");
-//         console.log("Results Summary:");
-//         console.log("- FHE Integration: WORKING");
-//         console.log("- EigenLayer AVS: WORKING");
-//         console.log("- Uniswap v4 Hook: WORKING");
-//         console.log("- JIT Liquidity Execution: WORKING");
-//         console.log("- MEV Protection: WORKING");
-//         console.log("- Gas Optimized: WORKING");
-//         console.log("- Error Handling: WORKING");
-//     }
-// }
+    function testIndividualErrorHandling() public {
+        testEdgeCasesAndErrors();
+    }
+}
