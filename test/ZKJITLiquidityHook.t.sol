@@ -69,7 +69,6 @@ contract ZKJITLiquidityTest is Test, Deployers {
         MockERC20(Currency.unwrap(currency0)).approve(address(hook), type(uint256).max);
         MockERC20(Currency.unwrap(currency1)).approve(address(hook), type(uint256).max);
 
-
         // Initialize the pool
         (key,) = initPool(currency0, currency1, hook, 3000, SQRT_PRICE_1_1);
 
