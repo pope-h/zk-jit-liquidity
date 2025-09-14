@@ -9,4 +9,7 @@ optimizer_runs = 800
 via_ir = false
 ffi = true
 
+[dependencies]
+"@fhenixprotocol/cofhe-contracts" = { version = "0.0.12" }
+
 # See more config options https://github.com/foundry-rs/foundry/blob/master/crates/config/README.md#all-options

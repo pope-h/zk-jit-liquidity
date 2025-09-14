@@ -7,6 +7,3 @@
 [submodule "lib/cofhe-contracts"]
 	path = lib/cofhe-contracts
 	url = https://github.com/fhenixprotocol/cofhe-contracts
-[submodule "lib/cofhe-mock-contracts"]
-	path = lib/cofhe-mock-contracts
-	url = https://github.com/fhenixprotocol/cofhe-mock-contracts
