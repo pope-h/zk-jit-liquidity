@@ -80,6 +80,15 @@ contract ZKJITLiquidityHook is BaseHook {
         uint256 timestamp;
     }
 
+    struct DynamicPricing {
+        uint256 baseVolatility; // Base volatility measure (scaled by 1e6)
+        uint256 volumeWeight; // Recent volume weight
+        uint256 lastPriceUpdate;
+        uint256 priceMovementFactor; // Factor for price-based fee adjustment
+        uint24 baseFee; // Base fee rate
+        uint24 currentDynamicFee; // Current dynamic fee
+    }
+
     // ============ Storage ============
 
     // LP Management
@@ -97,6 +106,9 @@ contract ZKJITLiquidityHook is BaseHook {
     uint256 public nextSwapId;
     uint256 public nextTokenId = 1;
 
+    // Dynamic Pricing
+    mapping(PoolId => DynamicPricing) public poolPricing;
+
     // EigenLayer operator simulation
     mapping(address => bool) public authorizedOperators;
     mapping(address => uint256) public operatorStake;
@@ -109,11 +121,6 @@ contract ZKJITLiquidityHook is BaseHook {
     int24 private constant TICK_RANGE = 60; // Range around current tick for JIT liquidity
     uint256 private constant VOLATILITY_WINDOW = 100; // Blocks to measure volatility
     uint24 private constant BASE_DYNAMIC_FEE = 3000; // 0.3% base fee
-
-    uint128 movingAverageGasPrice;
-    uint104 movingAverageGasPriceCount;
-
-    error MustUseDynamicFee();
 
     // FHE Constants
     euint128 private ENCRYPTED_ZERO;
@@ -128,6 +135,7 @@ contract ZKJITLiquidityHook is BaseHook {
     );
     event LiquidityRemoved(address indexed lp, PoolId indexed poolId, uint128 liquidity);
     event ProfitHedged(address indexed lp, PoolId indexed poolId, uint256 amount0, uint256 amount1);
+    event DynamicFeeUpdated(PoolId indexed poolId, uint24 oldFee, uint24 newFee, uint256 volatility);
     event JITMultiLPExecution(uint256 indexed swapId, address[] lps, uint128[] contributions);
     event LPConfigSet(PoolId indexed poolId, address indexed lp, bool isActive);
     event JITRequested(uint256 indexed swapId, PoolId indexed poolId, address indexed swapper, uint128 swapAmount);
@@ -135,8 +143,6 @@ contract ZKJITLiquidityHook is BaseHook {
     event OperatorVoted(uint256 indexed swapId, address indexed operator, bool approved);
 
     constructor(IPoolManager _poolManager) BaseHook(_poolManager) {
-        updateMovingAverage();
-
         // Initialize FHE constants
         ENCRYPTED_ZERO = FHE.asEuint128(0);
         ENCRYPTED_ZERO_32 = FHE.asEuint32(0);
@@ -170,8 +176,18 @@ contract ZKJITLiquidityHook is BaseHook {
     /**
      * @notice Initialize dynamic pricing for a pool
      */
-    function _beforeInitialize(address, PoolKey calldata key, uint160) internal pure override returns (bytes4) {
-        if (!key.fee.isDynamicFee()) revert MustUseDynamicFee();
+    function _beforeInitialize(address, PoolKey calldata key, uint160) internal override returns (bytes4) {
+        PoolId poolId = key.toId();
+
+        // Initialize dynamic pricing
+        poolPricing[poolId] = DynamicPricing({
+            baseVolatility: 1e6, // 1.0 in scaled format
+            volumeWeight: 0,
+            lastPriceUpdate: block.timestamp,
+            priceMovementFactor: 1e6,
+            baseFee: BASE_DYNAMIC_FEE,
+            currentDynamicFee: BASE_DYNAMIC_FEE
+        });
 
         return this.beforeInitialize.selector;
     }
@@ -356,8 +372,8 @@ contract ZKJITLiquidityHook is BaseHook {
         if (!config.autoHedgeEnabled) return;
 
         // In a real implementation, this would decrypt the hedge percentage
-        // For demo purposes, assume 100% auto-hedge
-        uint256 hedgePercentage = 100;
+        // For demo purposes, assume 50% auto-hedge
+        uint256 hedgePercentage = 50;
 
         uint256 profit0 = lpProfits0[poolId][lp];
         uint256 profit1 = lpProfits1[poolId][lp];
@@ -378,31 +394,53 @@ contract ZKJITLiquidityHook is BaseHook {
 
     // ============ Dynamic Pricing Functions ============
 
-    // Update our moving average gas price
-    function updateMovingAverage() internal {
-        uint128 gasPrice = uint128(tx.gasprice);
+    /**
+     * @notice Update dynamic pricing based on recent activity
+     */
+    function _updateDynamicPricing(PoolKey calldata key, uint128 swapAmount) private {
+        PoolId poolId = key.toId();
+        DynamicPricing storage pricing = poolPricing[poolId];
 
-        // New Average = ((Old Average * # of Txns Tracked) + Current Gas Price) / (# of Txns Tracked + 1)
-        movingAverageGasPrice =
-            ((movingAverageGasPrice * movingAverageGasPriceCount) + gasPrice) / (movingAverageGasPriceCount + 1);
+        // Get current price info
+        // (, int24 currentTick,,) = poolManager.getSlot0(poolId);
+        // uint256 currentPrice = TickMath.getSqrtPriceAtTick(currentTick);
 
-        movingAverageGasPriceCount++;
+        // Simple volatility measure based on swap size relative to typical size
+        uint256 relativeSize = (swapAmount * 1e6) / 1000; // Scaled relative size
+        pricing.baseVolatility = (pricing.baseVolatility * 9 + relativeSize) / 10; // Moving average
+
+        // Update volume weight
+        pricing.volumeWeight += swapAmount;
+
+        // Calculate new dynamic fee based on volatility
+        uint24 newFee;
+        if (pricing.baseVolatility > 2e6) {
+            // High volatility
+            newFee = uint24((uint256(pricing.baseFee) * 150) / 100); // 1.5x
+        } else if (pricing.baseVolatility < 5e5) {
+            // Low volatility
+            newFee = uint24((uint256(pricing.baseFee) * 75) / 100); // 0.75x
+        } else {
+            newFee = pricing.baseFee; // Normal
+        }
+
+        // Cap the fee
+        newFee = newFee > 10000 ? 10000 : newFee; // Max 1%
+        newFee = newFee < 500 ? 500 : newFee; // Min 0.05%
+
+        if (newFee != pricing.currentDynamicFee) {
+            emit DynamicFeeUpdated(poolId, pricing.currentDynamicFee, newFee, pricing.baseVolatility);
+            pricing.currentDynamicFee = newFee;
+        }
+
+        pricing.lastPriceUpdate = block.timestamp;
     }
 
-    function getFee() internal view returns (uint24) {
-        uint128 gasPrice = uint128(tx.gasprice);
-
-        // if gasPrice > movingAverageGasPrice * 1.1, then half the fees
-        if (gasPrice > (movingAverageGasPrice * 11) / 10) {
-            return BASE_DYNAMIC_FEE / 2;
-        }
-
-        // if gasPrice < movingAverageGasPrice * 0.9, then double the fees
-        if (gasPrice < (movingAverageGasPrice * 9) / 10) {
-            return BASE_DYNAMIC_FEE * 2;
-        }
-
-        return BASE_DYNAMIC_FEE;
+    /**
+     * @notice Get current dynamic fee for pool
+     */
+    function getCurrentDynamicFee(PoolKey calldata key) external view returns (uint24) {
+        return poolPricing[key.toId()].currentDynamicFee;
     }
 
     // ============ Multi-LP JIT Logic ============
@@ -510,13 +548,17 @@ contract ZKJITLiquidityHook is BaseHook {
     /**
      * @notice Before swap hook - evaluates multi-LP JIT with dynamic pricing
      */
-    function _beforeSwap(address sender, PoolKey calldata key, SwapParams calldata params, bytes calldata)
-        internal
+    function beforeSwap(address sender, PoolKey calldata key, SwapParams calldata params, bytes calldata)
+        external
         override
+        onlyPoolManager
         returns (bytes4, BeforeSwapDelta, uint24)
     {
         uint128 swapAmount =
             uint128(params.amountSpecified > 0 ? uint256(params.amountSpecified) : uint256(-params.amountSpecified));
+
+        // Update dynamic pricing
+        _updateDynamicPricing(key, swapAmount);
 
         // Evaluate multi-LP JIT participation
         (address[] memory eligibleLPs, uint128[] memory contributions) = _evaluateMultiLPJIT(key, swapAmount);
@@ -530,7 +572,7 @@ contract ZKJITLiquidityHook is BaseHook {
         }
 
         // Return dynamic fee
-        uint24 dynamicFee = getFee();
+        uint24 dynamicFee = poolPricing[key.toId()].currentDynamicFee;
         uint24 feeWithFlag = dynamicFee | LPFeeLibrary.OVERRIDE_FEE_FLAG;
 
         return (this.beforeSwap.selector, BeforeSwapDeltaLibrary.ZERO_DELTA, feeWithFlag);
@@ -631,14 +673,14 @@ contract ZKJITLiquidityHook is BaseHook {
     /**
      * @notice After swap hook - cleanup and finalize
      */
-    function _afterSwap(address, PoolKey calldata key, SwapParams calldata, BalanceDelta, bytes calldata)
-        internal
+    function afterSwap(address, PoolKey calldata key, SwapParams calldata, BalanceDelta, bytes calldata)
+        external
         override
+        onlyPoolManager
         returns (bytes4, int128)
     {
         // Remove any JIT liquidity that was added for this swap
         _removeJITLiquidity(key);
-        updateMovingAverage();
 
         return (this.afterSwap.selector, 0);
     }
@@ -795,6 +837,13 @@ contract ZKJITLiquidityHook is BaseHook {
      */
     function getJITPosition(uint256 swapId) external view returns (JITLiquidityPosition memory) {
         return jitPositions[swapId];
+    }
+
+    /**
+     * @notice Get pool pricing information
+     */
+    function getPoolPricing(PoolKey calldata poolKey) external view returns (DynamicPricing memory) {
+        return poolPricing[poolKey.toId()];
     }
 
     /**
