@@ -688,7 +688,7 @@ contract ZKJITLiquidityHook is BaseHook {
         uint128 totalLiquidity,
         uint256 feeGrowthGlobal0,
         uint256 feeGrowthGlobal1,
-        uint256 swapId // Add swapId parameter
+        uint256 swapId
     ) private {
         LPPosition[] storage lpPositionsArray = lpPositions[poolId][lp];
         uint256 lpFees0 = 0;
@@ -904,42 +904,6 @@ contract ZKJITLiquidityHook is BaseHook {
         delete operators;
     }
 
-    // ============ Emergency Functions ============
-
-    /**
-     * @notice Emergency withdrawal for LP (in case of issues)
-     */
-    function emergencyWithdraw(PoolKey calldata poolKey) external {
-        PoolId poolId = poolKey.toId();
-        LPPosition[] storage positions = lpPositions[poolId][msg.sender];
-
-        uint256 totalAmount0 = 0;
-        uint256 totalAmount1 = 0;
-
-        for (uint256 i = 0; i < positions.length; i++) {
-            if (positions[i].isActive) {
-                totalAmount0 += positions[i].token0Amount;
-                totalAmount1 += positions[i].token1Amount;
-                positions[i].isActive = false;
-            }
-        }
-
-        // Also withdraw any accumulated profits
-        totalAmount0 += lpProfits0[poolId][msg.sender];
-        totalAmount1 += lpProfits1[poolId][msg.sender];
-
-        lpProfits0[poolId][msg.sender] = 0;
-        lpProfits1[poolId][msg.sender] = 0;
-
-        // Transfer tokens back
-        if (totalAmount0 > 0) {
-            poolKey.currency0.take(poolManager, msg.sender, totalAmount0, false);
-        }
-        if (totalAmount1 > 0) {
-            poolKey.currency1.take(poolManager, msg.sender, totalAmount1, false);
-        }
-    }
-
     /**
      * @notice Batch operations for gas efficiency
      */
@@ -974,25 +938,5 @@ contract ZKJITLiquidityHook is BaseHook {
                 poolKey, tickLower, tickUpper, liquidityFromProfits, uint128(profit0), uint128(profit1)
             );
         }
-    }
-
-    /**
-     * @notice Set risk parameters for automated JIT participation
-     */
-    function setRiskParameters(
-        PoolKey calldata poolKey,
-        uint128,
-        /**
-         * maxPositionSize
-         */
-        uint256 riskToleranceBps
-    ) external {
-        PoolId poolId = poolKey.toId();
-        require(isLPRegistered[poolId][msg.sender], "LP not registered");
-        require(riskToleranceBps <= 10000, "Invalid risk tolerance");
-
-        // Store risk parameters (could be encrypted in full implementation)
-        // For now, we'll emit an event to show the functionality
-        emit LPConfigSet(poolId, msg.sender, true);
     }
 }
