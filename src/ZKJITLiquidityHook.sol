@@ -118,8 +118,8 @@ contract ZKJITLiquidityHook is BaseHook {
     uint256 private constant VOLATILITY_WINDOW = 100; // Blocks to measure volatility
     uint24 private constant BASE_DYNAMIC_FEE = 3000; // 0.3% base fee
 
-    uint128 movingAverageGasPrice;
-    uint104 movingAverageGasPriceCount;
+    uint128 public movingAverageGasPrice;
+    uint104 public movingAverageGasPriceCount;
 
     error MustUseDynamicFee();
 
