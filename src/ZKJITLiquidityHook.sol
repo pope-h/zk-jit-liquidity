@@ -50,6 +50,7 @@ contract ZKJITLiquidityHook is BaseHook {
         Currency currency0;
         Currency currency1;
         address sender;
+        bool isDeposit; // True if adding liquidity, false if removing
     }
 
     struct LPConfig {
@@ -269,7 +270,7 @@ contract ZKJITLiquidityHook is BaseHook {
         lpPositions[poolId][msg.sender].push(newPosition);
         tokenIdToLP[poolId][tokenId] = msg.sender;
 
-        poolManager.unlock(abi.encode(CallbackData(amount0Max, poolKey.currency0, poolKey.currency1, msg.sender)));
+        poolManager.unlock(abi.encode(CallbackData(amount0Max, poolKey.currency0, poolKey.currency1, msg.sender, true)));
 
         emit LPTokenMinted(msg.sender, poolId, tokenId, liquidityDelta);
         emit LiquidityAdded(msg.sender, poolId, tickLower, tickUpper, liquidityDelta);
@@ -280,15 +281,25 @@ contract ZKJITLiquidityHook is BaseHook {
     function unlockCallback(bytes calldata data) external onlyPoolManager returns (bytes memory) {
         CallbackData memory callbackData = abi.decode(data, (CallbackData));
 
-        // Mint ERC-6909 token (using pool manager's ERC-6909 functionality)
-        poolManager.mint(callbackData.sender, CurrencyLibrary.toId(callbackData.currency0), callbackData.amountEach);
-        poolManager.mint(callbackData.sender, CurrencyLibrary.toId(callbackData.currency1), callbackData.amountEach);
+        if (callbackData.isDeposit) {
+            // Mint ERC-6909 token (using pool manager's ERC-6909 functionality)
+            poolManager.mint(callbackData.sender, CurrencyLibrary.toId(callbackData.currency0), callbackData.amountEach);
+            poolManager.mint(callbackData.sender, CurrencyLibrary.toId(callbackData.currency1), callbackData.amountEach);
 
-        // Transfer tokens from LP to the hook
-        callbackData.currency0.settle(poolManager, callbackData.sender, callbackData.amountEach, false);
-        callbackData.currency1.settle(poolManager, callbackData.sender, callbackData.amountEach, false);
+            // Transfer tokens from LP to the hook
+            callbackData.currency0.settle(poolManager, callbackData.sender, callbackData.amountEach, false);
+            callbackData.currency1.settle(poolManager, callbackData.sender, callbackData.amountEach, false);
 
-        return "";
+            return "";
+        } else {
+            poolManager.burn(callbackData.sender, CurrencyLibrary.toId(callbackData.currency0), callbackData.amountEach);
+            poolManager.burn(callbackData.sender, CurrencyLibrary.toId(callbackData.currency1), callbackData.amountEach);
+
+            callbackData.currency0.take(poolManager, callbackData.sender, callbackData.amountEach, false);
+            callbackData.currency1.take(poolManager, callbackData.sender, callbackData.amountEach, false);
+
+            return "";
+        }
     }
 
     /**
@@ -352,12 +363,21 @@ contract ZKJITLiquidityHook is BaseHook {
             lpProfits0[poolId][msg.sender] -= hedgeAmount0;
             lpProfits1[poolId][msg.sender] -= hedgeAmount1;
 
-            // Transfer hedged profits to LP
+            // Direct transfer from hook's accumulated reserves
             if (hedgeAmount0 > 0) {
-                poolKey.currency0.take(poolManager, msg.sender, hedgeAmount0, false);
+                require(
+                    IERC20(Currency.unwrap(poolKey.currency0)).balanceOf(address(this)) >= hedgeAmount0,
+                    "Insufficient hook reserves for token0"
+                );
+                IERC20(Currency.unwrap(poolKey.currency0)).transfer(msg.sender, hedgeAmount0);
             }
+
             if (hedgeAmount1 > 0) {
-                poolKey.currency1.take(poolManager, msg.sender, hedgeAmount1, false);
+                require(
+                    IERC20(Currency.unwrap(poolKey.currency1)).balanceOf(address(this)) >= hedgeAmount1,
+                    "Insufficient hook reserves for token1"
+                );
+                IERC20(Currency.unwrap(poolKey.currency1)).transfer(msg.sender, hedgeAmount1);
             }
 
             emit ProfitHedged(msg.sender, poolId, hedgeAmount0, hedgeAmount1);
@@ -633,14 +653,55 @@ contract ZKJITLiquidityHook is BaseHook {
                 timestamp: block.timestamp
             });
 
-            // For each participating LP, update their profits and auto-hedge if enabled
-            for (uint256 i = 0; i < lps.length; i++) {
-                lpProfits0[key.toId()][lps[i]] += contributions[i] / 2; // Simplified profit calculation
-                lpProfits1[key.toId()][lps[i]] += contributions[i] / 2;
+            PendingJIT memory jit = pendingJITs[swapId];
+            _calculateAndDistributeProfits(key, jit.swapAmount, lps, contributions);
+        }
+    }
 
-                // Auto-hedge if enabled
-                _autoHedgeProfits(key.toId(), lps[i]);
-            }
+    /**
+     * @notice Simple profit calculation based on swap fees
+     */
+    function _calculateAndDistributeProfits(
+        PoolKey memory key,
+        uint256 swapAmount,
+        address[] memory lps,
+        uint128[] memory contributions
+    ) internal {
+        PoolId poolId = key.toId();
+
+        // Get current dynamic fee
+        uint24 currentFee = getFee(); // Your existing dynamic fee function
+
+        // Calculate total fees from this swap
+        uint256 totalFees = (swapAmount * currentFee) / 1000000; // Convert from basis points
+
+        // Simple split: 50% token0, 50% token1
+        uint256 fees0 = totalFees / 2;
+        uint256 fees1 = totalFees / 2;
+
+        // Calculate total contributions
+        uint128 totalContribution = 0;
+        for (uint256 i = 0; i < contributions.length; i++) {
+            totalContribution += contributions[i];
+        }
+
+        if (totalContribution == 0) return;
+
+        // Distribute proportionally to each LP
+        for (uint256 i = 0; i < lps.length; i++) {
+            address lp = lps[i];
+            uint128 contribution = contributions[i];
+
+            // Calculate LP's share
+            uint256 lpFees0 = (fees0 * contribution) / totalContribution;
+            uint256 lpFees1 = (fees1 * contribution) / totalContribution;
+
+            // Add to their profit tracking
+            lpProfits0[poolId][lp] += lpFees0;
+            lpProfits1[poolId][lp] += lpFees1;
+
+            // Auto-hedge if enabled
+            _autoHedgeProfits(poolId, lp);
         }
     }
 
@@ -904,7 +965,9 @@ contract ZKJITLiquidityHook is BaseHook {
             // Add as new liquidity position
             uint128 liquidityFromProfits = uint128((profit0 + profit1) / 2); // Simplified calculation
 
-            depositLiquidityToHook(poolKey, tickLower, tickUpper, liquidityFromProfits, uint128(profit0), uint128(profit1));
+            depositLiquidityToHook(
+                poolKey, tickLower, tickUpper, liquidityFromProfits, uint128(profit0), uint128(profit1)
+            );
         }
     }
 
