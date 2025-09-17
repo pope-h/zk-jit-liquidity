@@ -282,19 +282,22 @@ contract ZKJITLiquidityHook is BaseHook {
         CallbackData memory callbackData = abi.decode(data, (CallbackData));
 
         if (callbackData.isDeposit) {
-            // Mint ERC-6909 token (using pool manager's ERC-6909 functionality)
-            poolManager.mint(callbackData.sender, CurrencyLibrary.toId(callbackData.currency0), callbackData.amountEach);
-            poolManager.mint(callbackData.sender, CurrencyLibrary.toId(callbackData.currency1), callbackData.amountEach);
-
-            // Transfer tokens from LP to the hook
+            // For deposits: LP provides tokens to hook
             callbackData.currency0.settle(poolManager, callbackData.sender, callbackData.amountEach, false);
             callbackData.currency1.settle(poolManager, callbackData.sender, callbackData.amountEach, false);
 
+            // Mint ERC-6909 tokens (simplified)
+            poolManager.mint(callbackData.sender, CurrencyLibrary.toId(callbackData.currency0), callbackData.amountEach);
+            poolManager.mint(callbackData.sender, CurrencyLibrary.toId(callbackData.currency1), callbackData.amountEach);
+
             return "";
         } else {
-            poolManager.burn(callbackData.sender, CurrencyLibrary.toId(callbackData.currency0), callbackData.amountEach);
-            poolManager.burn(callbackData.sender, CurrencyLibrary.toId(callbackData.currency1), callbackData.amountEach);
+            // For withdrawals: hook provides tokens to LP
+            // First settle from hook's balance to pool manager
+            callbackData.currency0.settle(poolManager, address(this), callbackData.amountEach, false);
+            callbackData.currency1.settle(poolManager, address(this), callbackData.amountEach, false);
 
+            // Then take to LP
             callbackData.currency0.take(poolManager, callbackData.sender, callbackData.amountEach, false);
             callbackData.currency1.take(poolManager, callbackData.sender, callbackData.amountEach, false);
 
@@ -331,9 +334,9 @@ contract ZKJITLiquidityHook is BaseHook {
                     positions[i].isActive = false;
                 }
 
-                // Return tokens to LP
-                poolKey.currency0.take(poolManager, msg.sender, amount0, false);
-                poolKey.currency1.take(poolManager, msg.sender, amount1, false);
+                poolManager.unlock(
+                    abi.encode(CallbackData(amount0, poolKey.currency0, poolKey.currency1, msg.sender, false))
+                );
 
                 emit LPTokenBurned(msg.sender, poolId, tokenId, liquidityDelta);
                 emit LiquidityRemoved(msg.sender, poolId, liquidityDelta);

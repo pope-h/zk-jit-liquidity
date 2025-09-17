@@ -495,6 +495,62 @@ contract ZKJITLiquidityTest is Test, Deployers, CoFheTest {
         console.log("Auto-hedging functionality tested");
     }
 
+    // ----------------------------------------------------------------------
+    // ----------------------------------------------------------------------
+    // =================== Test 6: LP Position Management ===================
+    // ----------------------------------------------------------------------
+    // ----------------------------------------------------------------------
+
+    function testLPPositionManagement() public {
+        console.log("\nTEST 6: LP Position Management");
+
+        MockERC20(Currency.unwrap(currency0)).mint(address(hook), 100000);
+        MockERC20(Currency.unwrap(currency1)).mint(address(hook), 100000);
+
+        vm.startPrank(LP1);
+
+        // Configure LP
+        InEuint128 memory encMinSwap = createInEuint128(1000, LP1);
+        InEuint128 memory encMaxLiq = createInEuint128(50000, LP1);
+        InEuint32 memory encProfit = createInEuint32(40, LP1);
+        InEuint32 memory encHedge = createInEuint32(25, LP1);
+
+        hook.configureLPSettings(key, encMinSwap, encMaxLiq, encProfit, encHedge, false);
+
+        // Add multiple positions
+        uint256 tokenId1 = hook.depositLiquidityToHook(key, -180, -60, 2000, 1000, 1000);
+        uint256 tokenId2 = hook.depositLiquidityToHook(key, -60, 60, 3000, 1500, 1500);
+        uint256 tokenId3 = hook.depositLiquidityToHook(key, 60, 180, 2500, 1250, 1250);
+
+        console.log("Added 3 LP positions with token IDs: %s, %s, %s", tokenId1, tokenId2, tokenId3);
+
+        // Check positions
+        ZKJITLiquidityHook.LPPosition[] memory positions = hook.getLPPositions(key, LP1);
+        assertEq(positions.length, 3, "Should have 3 positions");
+
+        // Remove middle position
+        (uint128 amount0, uint128 amount1) = hook.removeLiquidityFromHook(key, tokenId2, 1500); // Remove half
+        console.log("Removed liquidity, received: %s token0, %s token1", amount0, amount1);
+
+        // Verify position updated
+        positions = hook.getLPPositions(key, LP1);
+        bool foundUpdatedPosition = false;
+        for (uint256 i = 0; i < positions.length; i++) {
+            if (positions[i].tokenId == tokenId2) {
+                assertEq(positions[i].liquidity, 1500, "Remaining liquidity should be 1500");
+                foundUpdatedPosition = true;
+                break;
+            }
+        }
+        assertTrue(foundUpdatedPosition, "Should find updated position");
+
+        vm.stopPrank();
+
+        emit TestScenario("LP Position Management", true, "Multiple positions created, modified, and tracked");
+        console.log("LP position management test completed");
+    }
+
+    // removeLiquidityFromHook
     // depositLiquidityToHook
     // 9969990059919
     // 9939970299349
