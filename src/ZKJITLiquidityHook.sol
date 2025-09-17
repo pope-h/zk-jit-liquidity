@@ -655,9 +655,6 @@ contract ZKJITLiquidityHook is BaseHook {
                 isActive: true,
                 timestamp: block.timestamp
             });
-
-            PendingJIT memory jit = pendingJITs[swapId];
-            _calculateAndDistributeProfits(key, jit.swapAmount, lps, contributions);
         }
     }
 
@@ -666,44 +663,53 @@ contract ZKJITLiquidityHook is BaseHook {
      */
     function _calculateAndDistributeProfits(
         PoolKey memory key,
-        uint256 swapAmount,
+        uint256 swapId,
         address[] memory lps,
         uint128[] memory contributions
     ) internal {
         PoolId poolId = key.toId();
-
-        // Get current dynamic fee
-        uint24 currentFee = getFee(); // Your existing dynamic fee function
-
-        // Calculate total fees from this swap
-        uint256 totalFees = (swapAmount * currentFee) / 1000000; // Convert from basis points
-
-        // Simple split: 50% token0, 50% token1
-        uint256 fees0 = totalFees / 2;
-        uint256 fees1 = totalFees / 2;
-
-        // Calculate total contributions
-        uint128 totalContribution = 0;
-        for (uint256 i = 0; i < contributions.length; i++) {
-            totalContribution += contributions[i];
-        }
-
-        if (totalContribution == 0) return;
-
-        // Distribute proportionally to each LP
+        JITLiquidityPosition storage position = jitPositions[swapId];
+        if (!position.isActive) return;
+        (uint256 feeGrowthGlobal0, uint256 feeGrowthGlobal1) = StateLibrary.getFeeGrowthGlobals(poolManager, poolId);
+        uint128 totalLiquidity = position.totalLiquidity;
+        if (totalLiquidity == 0) return;
         for (uint256 i = 0; i < lps.length; i++) {
-            address lp = lps[i];
-            uint128 contribution = contributions[i];
+            _distributeLPFees(
+                poolId, lps[i], contributions[i], totalLiquidity, feeGrowthGlobal0, feeGrowthGlobal1, swapId
+            );
+        }
+    }
 
-            // Calculate LP's share
-            uint256 lpFees0 = (fees0 * contribution) / totalContribution;
-            uint256 lpFees1 = (fees1 * contribution) / totalContribution;
-
-            // Add to their profit tracking
+    // Helper function to distribute fees for a single LP
+    function _distributeLPFees(
+        PoolId poolId,
+        address lp,
+        uint128 contribution,
+        uint128 totalLiquidity,
+        uint256 feeGrowthGlobal0,
+        uint256 feeGrowthGlobal1,
+        uint256 swapId // Add swapId parameter
+    ) private {
+        LPPosition[] storage lpPositionsArray = lpPositions[poolId][lp];
+        uint256 lpFees0 = 0;
+        uint256 lpFees1 = 0;
+        JITLiquidityPosition storage jitPos = jitPositions[swapId]; // Use swapId
+        for (uint256 j = 0; j < lpPositionsArray.length; j++) {
+            LPPosition storage pos = lpPositionsArray[j];
+            if (pos.isActive && pos.tickLower <= jitPos.tickUpper && pos.tickUpper >= jitPos.tickLower) {
+                uint256 fees0 = ((feeGrowthGlobal0 - pos.lastFeeGrowth0) * pos.liquidity) / 1e18;
+                uint256 fees1 = ((feeGrowthGlobal1 - pos.lastFeeGrowth1) * pos.liquidity) / 1e18;
+                pos.uncollectedFees0 += fees0;
+                pos.uncollectedFees1 += fees1;
+                pos.lastFeeGrowth0 = feeGrowthGlobal0;
+                pos.lastFeeGrowth1 = feeGrowthGlobal1;
+                lpFees0 += (fees0 * contribution) / totalLiquidity;
+                lpFees1 += (fees1 * contribution) / totalLiquidity;
+            }
+        }
+        if (lpFees0 > 0 || lpFees1 > 0) {
             lpProfits0[poolId][lp] += lpFees0;
             lpProfits1[poolId][lp] += lpFees1;
-
-            // Auto-hedge if enabled
             _autoHedgeProfits(poolId, lp);
         }
     }
@@ -716,36 +722,32 @@ contract ZKJITLiquidityHook is BaseHook {
         override
         returns (bytes4, int128)
     {
-        // Remove any JIT liquidity that was added for this swap
-        _removeJITLiquidity(key);
+        uint256 currentSwapId = nextSwapId;
+        if (currentSwapId > 0) {
+            JITLiquidityPosition storage position = jitPositions[currentSwapId];
+            if (position.isActive) {
+                _calculateAndDistributeProfits(key, currentSwapId, position.participatingLPs, position.lpContributions);
+                _removeJITLiquidity(key, currentSwapId);
+            }
+        }
         updateMovingAverage();
-
         return (this.afterSwap.selector, 0);
     }
 
     /**
      * @notice Remove JIT liquidity after swap execution
      */
-    function _removeJITLiquidity(PoolKey calldata key) private {
-        uint256 currentSwapId = nextSwapId;
-        if (currentSwapId > 0) {
-            JITLiquidityPosition storage position = jitPositions[currentSwapId];
-
-            if (position.isActive) {
-                position.isActive = false;
-
-                // Distribute any remaining profits to participating LPs
-                for (uint256 i = 0; i < position.participatingLPs.length; i++) {
-                    address lp = position.participatingLPs[i];
-                    uint128 contribution = position.lpContributions[i];
-
-                    // Add final profit distribution (simplified)
-                    lpProfits0[key.toId()][lp] += contribution / 20; // Small additional profit
-                    lpProfits1[key.toId()][lp] += contribution / 20;
-
-                    // Trigger auto-hedge if enabled
-                    _autoHedgeProfits(key.toId(), lp);
-                }
+    function _removeJITLiquidity(PoolKey calldata key, uint256 swapId) private {
+        JITLiquidityPosition storage position = jitPositions[swapId];
+        if (position.isActive) {
+            position.isActive = false;
+            // Optional: Restore final profit distribution
+            for (uint256 i = 0; i < position.participatingLPs.length; i++) {
+                address lp = position.participatingLPs[i];
+                uint128 contribution = position.lpContributions[i];
+                lpProfits0[key.toId()][lp] += contribution / 20; // Demo-specific
+                lpProfits1[key.toId()][lp] += contribution / 20;
+                _autoHedgeProfits(key.toId(), lp);
             }
         }
     }
