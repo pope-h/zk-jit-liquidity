@@ -45,6 +45,13 @@ contract ZKJITLiquidityHook is BaseHook {
         bool isActive;
     }
 
+    struct CallbackData {
+        uint256 amountEach; // Amount of each token to add as liquidity
+        Currency currency0;
+        Currency currency1;
+        address sender;
+    }
+
     struct LPConfig {
         euint128 minSwapSize; // Encrypted minimum swap size to trigger JIT
         euint128 maxLiquidity; // Encrypted maximum liquidity to provide
@@ -229,7 +236,7 @@ contract ZKJITLiquidityHook is BaseHook {
     /**
      * @notice Add liquidity and mint ERC-6909 LP token
      */
-    function addLiquidity(
+    function depositLiquidityToHook(
         PoolKey calldata poolKey,
         int24 tickLower,
         int24 tickUpper,
@@ -238,6 +245,7 @@ contract ZKJITLiquidityHook is BaseHook {
         uint128 amount1Max
     ) public returns (uint256 tokenId) {
         require(liquidityDelta > 0, "Invalid liquidity");
+
         PoolId poolId = poolKey.toId();
 
         // Create new token ID
@@ -261,13 +269,7 @@ contract ZKJITLiquidityHook is BaseHook {
         lpPositions[poolId][msg.sender].push(newPosition);
         tokenIdToLP[poolId][tokenId] = msg.sender;
 
-        // Mint ERC-6909 token (using pool manager's ERC-6909 functionality)
-        poolManager.mint(msg.sender, CurrencyLibrary.toId(poolKey.currency0), amount0Max);
-        poolManager.mint(msg.sender, CurrencyLibrary.toId(poolKey.currency1), amount1Max);
-
-        // Transfer tokens from LP to the hook
-        poolKey.currency0.settle(poolManager, msg.sender, amount0Max, false);
-        poolKey.currency1.settle(poolManager, msg.sender, amount1Max, false);
+        poolManager.unlock(abi.encode(CallbackData(amount0Max, poolKey.currency0, poolKey.currency1, msg.sender)));
 
         emit LPTokenMinted(msg.sender, poolId, tokenId, liquidityDelta);
         emit LiquidityAdded(msg.sender, poolId, tickLower, tickUpper, liquidityDelta);
@@ -275,10 +277,24 @@ contract ZKJITLiquidityHook is BaseHook {
         return tokenId;
     }
 
+    function unlockCallback(bytes calldata data) external onlyPoolManager returns (bytes memory) {
+        CallbackData memory callbackData = abi.decode(data, (CallbackData));
+
+        // Mint ERC-6909 token (using pool manager's ERC-6909 functionality)
+        poolManager.mint(callbackData.sender, CurrencyLibrary.toId(callbackData.currency0), callbackData.amountEach);
+        poolManager.mint(callbackData.sender, CurrencyLibrary.toId(callbackData.currency1), callbackData.amountEach);
+
+        // Transfer tokens from LP to the hook
+        callbackData.currency0.settle(poolManager, callbackData.sender, callbackData.amountEach, false);
+        callbackData.currency1.settle(poolManager, callbackData.sender, callbackData.amountEach, false);
+
+        return "";
+    }
+
     /**
      * @notice Remove liquidity and burn ERC-6909 LP token
      */
-    function removeLiquidity(PoolKey calldata poolKey, uint256 tokenId, uint128 liquidityDelta)
+    function removeLiquidityFromHook(PoolKey calldata poolKey, uint256 tokenId, uint128 liquidityDelta)
         external
         returns (uint128 amount0, uint128 amount1)
     {
@@ -888,7 +904,7 @@ contract ZKJITLiquidityHook is BaseHook {
             // Add as new liquidity position
             uint128 liquidityFromProfits = uint128((profit0 + profit1) / 2); // Simplified calculation
 
-            addLiquidity(poolKey, tickLower, tickUpper, liquidityFromProfits, uint128(profit0), uint128(profit1));
+            depositLiquidityToHook(poolKey, tickLower, tickUpper, liquidityFromProfits, uint128(profit0), uint128(profit1));
         }
     }
 
