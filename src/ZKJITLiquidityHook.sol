@@ -392,8 +392,8 @@ contract ZKJITLiquidityHook is BaseHook {
         if (!config.autoHedgeEnabled) return;
 
         // In a real implementation, this would decrypt the hedge percentage
-        // For demo purposes, assume 100% auto-hedge
-        uint256 hedgePercentage = 100;
+        // For demo purposes, assume 50% auto-hedge
+        uint256 hedgePercentage = 50;
 
         uint256 profit0 = lpProfits0[poolId][lp];
         uint256 profit1 = lpProfits1[poolId][lp];

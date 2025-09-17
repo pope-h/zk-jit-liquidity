@@ -440,6 +440,62 @@ contract ZKJITLiquidityTest is Test, Deployers, CoFheTest {
         assertGt(outputFromBaseFeeSwap, outputFromIncreasedFeeSwap);
     }
 
+    // ----------------------------------------------------------------------
+    // ----------------------------------------------------------------------
+    // ======================== Test 5: Auto-Hedging ========================
+    // ----------------------------------------------------------------------
+    // ----------------------------------------------------------------------
+
+    function testAutoHedging() public {
+        console.log("\nTEST 5: Automatic Profit Hedging");
+
+        // Setup LP with auto-hedging enabled
+        vm.startPrank(LP1);
+
+        InEuint128 memory encMinSwap = createInEuint128(800, LP1);
+        InEuint128 memory encMaxLiq = createInEuint128(40000, LP1);
+        InEuint32 memory encProfit = createInEuint32(30, LP1);
+        InEuint32 memory encHedge = createInEuint32(50, LP1); // 50% auto-hedge
+
+        // Enable auto-hedging
+        hook.configureLPSettings(key, encMinSwap, encMaxLiq, encProfit, encHedge, true);
+        hook.depositLiquidityToHook(key, -120, 120, 4000, 2000, 2000);
+
+        vm.stopPrank();
+
+        (uint256 startingProfit0, uint256 startingProfit1) = hook.getLPProfits(key, LP1);
+        console.log("Starting profits before auto-hedge: %s token0, %s token1", startingProfit0, startingProfit1);
+        assertEq(startingProfit0, 0);
+        assertEq(startingProfit1, 0);
+
+        // Execute swap to trigger JIT and auto-hedging
+        vm.startPrank(TRADER);
+
+        SwapParams memory params = SwapParams({
+            zeroForOne: true,
+            amountSpecified: -int256(largeSwap),
+            sqrtPriceLimitX96: TickMath.MIN_SQRT_PRICE + 1
+        });
+
+        PoolSwapTest.TestSettings memory testSettings =
+            PoolSwapTest.TestSettings({takeClaims: false, settleUsingBurn: false});
+
+        console.log("Executing swap to trigger auto-hedging...");
+        swapRouter.swap(key, params, testSettings, ZERO_BYTES);
+
+        vm.stopPrank();
+
+        // Check if auto-hedging occurred
+        (uint256 remainingProfit0, uint256 remainingProfit1) = hook.getLPProfits(key, LP1);
+        console.log("Remaining profits after auto-hedge: %s token0, %s token1", remainingProfit0, remainingProfit1);
+        assertGt(remainingProfit0, 0);
+        assertGt(remainingProfit1, 0);
+
+        emit TestScenario("Auto-Hedging", true, "LP profits automatically hedged during JIT execution");
+        console.log("Auto-hedging functionality tested");
+    }
+
+    // depositLiquidityToHook
     // 9969990059919
     // 9939970299349
     // 9984950269895
