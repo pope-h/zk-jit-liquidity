@@ -29,6 +29,13 @@ contract ZKJITLiquidityHook is BaseHook {
     using StateLibrary for IPoolManager;
     using LPFeeLibrary for uint24;
 
+    enum CallbackType {
+        AddToHook,
+        RemoveFromHook,
+        AddToPool,
+        RemoveFromPool
+    }
+
     // ============ LP Token Management Structures ============
 
     struct LPPosition {
@@ -50,7 +57,7 @@ contract ZKJITLiquidityHook is BaseHook {
         Currency currency0;
         Currency currency1;
         address sender;
-        bool isDeposit; // True if adding liquidity, false if removing
+        CallbackType callbackType;
     }
 
     struct LPConfig {
@@ -270,7 +277,7 @@ contract ZKJITLiquidityHook is BaseHook {
         lpPositions[poolId][msg.sender].push(newPosition);
         tokenIdToLP[poolId][tokenId] = msg.sender;
 
-        poolManager.unlock(abi.encode(CallbackData(amount0Max, poolKey.currency0, poolKey.currency1, msg.sender, true)));
+        poolManager.unlock(abi.encode(CallbackData(amount0Max, poolKey.currency0, poolKey.currency1, msg.sender, CallbackType.AddToHook)));
 
         emit LPTokenMinted(msg.sender, poolId, tokenId, liquidityDelta);
         emit LiquidityAdded(msg.sender, poolId, tickLower, tickUpper, liquidityDelta);
@@ -281,27 +288,35 @@ contract ZKJITLiquidityHook is BaseHook {
     function unlockCallback(bytes calldata data) external onlyPoolManager returns (bytes memory) {
         CallbackData memory callbackData = abi.decode(data, (CallbackData));
 
-        if (callbackData.isDeposit) {
+        if (callbackData.callbackType == CallbackType.AddToHook) {
             // For deposits: LP provides tokens to hook
             callbackData.currency0.settle(poolManager, callbackData.sender, callbackData.amountEach, false);
             callbackData.currency1.settle(poolManager, callbackData.sender, callbackData.amountEach, false);
 
             // Mint ERC-6909 tokens (simplified)
-            poolManager.mint(callbackData.sender, CurrencyLibrary.toId(callbackData.currency0), callbackData.amountEach);
-            poolManager.mint(callbackData.sender, CurrencyLibrary.toId(callbackData.currency1), callbackData.amountEach);
+            callbackData.currency0.take(poolManager, address(this), callbackData.amountEach, true);
+            callbackData.currency1.take(poolManager, address(this), callbackData.amountEach, true);
 
             return "";
-        } else {
+        } else if (callbackData.callbackType == CallbackType.RemoveFromHook) {
             // For withdrawals: hook provides tokens to LP
             // First settle from hook's balance to pool manager
             callbackData.currency0.settle(poolManager, address(this), callbackData.amountEach, false);
             callbackData.currency1.settle(poolManager, address(this), callbackData.amountEach, false);
 
             // Then take to LP
-            callbackData.currency0.take(poolManager, callbackData.sender, callbackData.amountEach, false);
-            callbackData.currency1.take(poolManager, callbackData.sender, callbackData.amountEach, false);
+            callbackData.currency0.take(poolManager, callbackData.sender, callbackData.amountEach, true);
+            callbackData.currency1.take(poolManager, callbackData.sender, callbackData.amountEach, true);
 
             return "";
+        } else if (callbackData.callbackType == CallbackType.AddToPool) {
+            // For adding liquidity to pool - simplified
+            return "";
+        } else if (callbackData.callbackType == CallbackType.RemoveFromPool) {
+            // For removing liquidity from pool - simplified
+            return "";
+        } else {
+            revert("Invalid callback type");
         }
     }
 
@@ -335,7 +350,7 @@ contract ZKJITLiquidityHook is BaseHook {
                 }
 
                 poolManager.unlock(
-                    abi.encode(CallbackData(amount0, poolKey.currency0, poolKey.currency1, msg.sender, false))
+                    abi.encode(CallbackData(amount0, poolKey.currency0, poolKey.currency1, msg.sender, CallbackType.RemoveFromHook))
                 );
 
                 emit LPTokenBurned(msg.sender, poolId, tokenId, liquidityDelta);
