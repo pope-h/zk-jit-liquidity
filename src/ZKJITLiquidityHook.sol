@@ -77,6 +77,7 @@ contract ZKJITLiquidityHook is BaseHook {
         uint128[] liquidityContributions; // How much each LP will contribute
     }
 
+    // JIT liquidity for a given range
     struct JITLiquidityPosition {
         uint256 swapId;
         int24 tickLower;
@@ -115,7 +116,6 @@ contract ZKJITLiquidityHook is BaseHook {
     uint256 private constant CONSENSUS_THRESHOLD = 66; // 66% consensus needed
     uint256 private constant JIT_DELAY_BLOCKS = 1; // Reduced for demo
     int24 private constant TICK_RANGE = 60; // Range around current tick for JIT liquidity
-    uint256 private constant VOLATILITY_WINDOW = 100; // Blocks to measure volatility
     uint24 private constant BASE_DYNAMIC_FEE = 3000; // 0.3% base fee
 
     uint128 public movingAverageGasPrice;
@@ -158,7 +158,7 @@ contract ZKJITLiquidityHook is BaseHook {
 
     function getHookPermissions() public pure override returns (Hooks.Permissions memory) {
         return Hooks.Permissions({
-            beforeInitialize: true,
+            beforeInitialize: true, // Validate dynamic fee usage
             afterInitialize: false,
             beforeAddLiquidity: false,
             afterAddLiquidity: false,
@@ -168,7 +168,7 @@ contract ZKJITLiquidityHook is BaseHook {
             afterSwap: true, // Execute JIT after swap completion
             beforeDonate: false,
             afterDonate: false,
-            beforeSwapReturnDelta: true, // Can modify swap behavior
+            beforeSwapReturnDelta: true, // Modify swap behavior
             afterSwapReturnDelta: false,
             afterAddLiquidityReturnDelta: false,
             afterRemoveLiquidityReturnDelta: false
@@ -568,7 +568,6 @@ contract ZKJITLiquidityHook is BaseHook {
             _autoExecuteMultiLPJIT(swapId);
         }
 
-        // Return dynamic fee
         uint24 dynamicFee = getFee();
         uint24 feeWithFlag = dynamicFee | LPFeeLibrary.OVERRIDE_FEE_FLAG;
 
@@ -680,7 +679,9 @@ contract ZKJITLiquidityHook is BaseHook {
         }
     }
 
-    // Helper function to distribute fees for a single LP
+    /**
+     * @notice Helper function to distribute fees for a single LP
+     */
     function _distributeLPFees(
         PoolId poolId,
         address lp,
@@ -693,7 +694,7 @@ contract ZKJITLiquidityHook is BaseHook {
         LPPosition[] storage lpPositionsArray = lpPositions[poolId][lp];
         uint256 lpFees0 = 0;
         uint256 lpFees1 = 0;
-        JITLiquidityPosition storage jitPos = jitPositions[swapId]; // Use swapId
+        JITLiquidityPosition storage jitPos = jitPositions[swapId];
         for (uint256 j = 0; j < lpPositionsArray.length; j++) {
             LPPosition storage pos = lpPositionsArray[j];
             if (pos.isActive && pos.tickLower <= jitPos.tickUpper && pos.tickUpper >= jitPos.tickLower) {
