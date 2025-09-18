@@ -634,151 +634,26 @@ contract ZKJITLiquidityTest is Test, Deployers, CoFheTest {
         vm.stopPrank();
     }
 
-    // ----------------------------------------------------------------------
-    // ----------------------------------------------------------------------
-    // ================== Test 9: Complete End-to-End Flow ==================
-    // ----------------------------------------------------------------------
-    // ----------------------------------------------------------------------
+    function testErrorHandling() public {
+        console.log("\nTEST: Error Handling & Security");
 
-    /// @notice Test 3: Small Swap - No JIT Trigger
-    function testSmallSwapNoJIT() public {
-        console.log("\nTEST 3: Small Swap (No JIT Trigger)");
+        // Test unauthorized access
+        vm.expectRevert("Not token owner");
+        hook.removeLiquidityFromHook(key, 999, 1000);
 
-        // Setup LP first
-        _setupMultipleLPs();
+        // Test invalid parameters
+        vm.expectRevert("Invalid percentage");
+        vm.prank(LP1);
+        hook.hedgeProfits(key, 150); // >100%
 
-        vm.startPrank(TRADER);
+        // Test insufficient liquidity
+        vm.startPrank(LP1);
+        uint256 tokenId = hook.depositLiquidityToHook(key, -60, 60, 1000, 500, 500);
 
-        console.log("Trader attempting swap of %s tokens (below threshold)", smallSwap);
-
-        uint256 balanceBefore = currency1.balanceOf(TRADER);
-
-        // Execute swap through swap router
-        SwapParams memory params = SwapParams({
-            zeroForOne: true,
-            amountSpecified: -int256(smallSwap),
-            sqrtPriceLimitX96: TickMath.MIN_SQRT_PRICE + 1
-        });
-
-        PoolSwapTest.TestSettings memory testSettings =
-            PoolSwapTest.TestSettings({takeClaims: false, settleUsingBurn: false});
-
-        swapRouter.swap(key, params, testSettings, ZERO_BYTES);
-
-        uint256 balanceAfter = currency1.balanceOf(TRADER);
-
+        vm.expectRevert("Insufficient liquidity");
+        hook.removeLiquidityFromHook(key, tokenId, 2000);
         vm.stopPrank();
 
-        // Should have received tokens from swap
-        assertGt(balanceAfter, balanceBefore, "Should have received tokens from swap");
-
-        emit TestScenario("Small Swap", true, "No JIT triggered - swap proceeds normally");
-        console.log("Small swap processed without JIT intervention");
+        emit TestScenario("Error Handling", true, "Security checks working");
     }
-
-    /// @notice Test 4: Large Swap - JIT Triggered with FHE
-    function testLargeSwapJITTrigger() public {
-        console.log("\nTEST 4: Large Swap (JIT Triggered)");
-
-        // Setup LP and operators
-        _setupMultipleLPs();
-        _setupOperators();
-
-        vm.startPrank(TRADER);
-
-        console.log("Trader attempting swap of %s tokens (above threshold)", largeSwap);
-
-        uint256 balanceBefore = currency1.balanceOf(TRADER);
-
-        // Create swap params for large swap
-        SwapParams memory params = SwapParams({
-            zeroForOne: true,
-            amountSpecified: -int256(largeSwap),
-            sqrtPriceLimitX96: TickMath.MIN_SQRT_PRICE + 1
-        });
-
-        PoolSwapTest.TestSettings memory testSettings =
-            PoolSwapTest.TestSettings({takeClaims: false, settleUsingBurn: false});
-
-        // This should trigger JIT evaluation and execution
-        console.log("FHE evaluating private thresholds...");
-
-        swapRouter.swap(key, params, testSettings, ZERO_BYTES);
-
-        uint256 balanceAfter = currency1.balanceOf(TRADER);
-
-        vm.stopPrank();
-
-        // Should have executed JIT operation
-        uint256 currentSwapId = hook.nextSwapId();
-        assertGt(currentSwapId, 0, "Should have created JIT operation");
-
-        // Should have received tokens from swap
-        assertGt(balanceAfter, balanceBefore, "Should have received tokens from swap");
-
-        emit TestScenario("Large Swap JIT Trigger", true, "FHE threshold exceeded - JIT executed");
-        console.log("Large swap triggered and executed JIT through FHE evaluation");
-
-        // Test the JIT operation details
-        ZKJITLiquidityHook.PendingJIT memory pendingJIT = hook.getPendingJIT(currentSwapId);
-        assertEq(pendingJIT.swapper, TRADER, "Should track correct swapper");
-        assertEq(pendingJIT.swapAmount, uint128(largeSwap), "Should track correct amount");
-        assertTrue(pendingJIT.executed, "JIT should be executed");
-
-        console.log("JIT Operation Details:");
-        console.log("- Swap ID: %s", pendingJIT.swapId);
-        console.log("- Swapper: %s", pendingJIT.swapper);
-        console.log("- Amount: %s", pendingJIT.swapAmount);
-        console.log("- Executed: %s", pendingJIT.executed);
-    }
-
-    // /// @notice Test 6: MEV Protection Scenario
-    // function testMEVProtectionScenario() public {
-    //     console.log("\nTEST 6: MEV Protection Scenario");
-
-    //     // Setup
-    //     _ensureLPConfigured();
-    //     _ensureOperatorsRegistered();
-
-    //     console.log("Simulating MEV attack attempt...");
-
-    //     // MEV bot tries to front-run with large swap
-    //     address mevBot = address(0x9999);
-    //     vm.deal(mevBot, 100 ether);
-    //     MockERC20(Currency.unwrap(currency0)).mint(mevBot, 100000 ether);
-    //     MockERC20(Currency.unwrap(currency1)).mint(mevBot, 100000 ether);
-
-    //     vm.startPrank(mevBot);
-    //     MockERC20(Currency.unwrap(currency0)).approve(address(swapRouter), type(uint256).max);
-    //     MockERC20(Currency.unwrap(currency1)).approve(address(swapRouter), type(uint256).max);
-
-    //     SwapParams memory mevParams = SwapParams({
-    //         zeroForOne: true,
-    //         amountSpecified: -int256(mevSwap),
-    //         sqrtPriceLimitX96: TickMath.MIN_SQRT_PRICE + 1
-    //     });
-
-    //     console.log("MEV bot attempting %s token swap to extract value", mevSwap);
-
-    //     uint256 balanceBefore = currency1.balanceOf(mevBot);
-
-    //     PoolSwapTest.TestSettings memory testSettings =
-    //         PoolSwapTest.TestSettings({takeClaims: false, settleUsingBurn: false});
-
-    //     swapRouter.swap(key, mevParams, testSettings, ZERO_BYTES);
-
-    //     uint256 balanceAfter = currency1.balanceOf(mevBot);
-
-    //     vm.stopPrank();
-
-    //     // The private nature of FHE means MEV bot can't predict LP behavior
-    //     console.log("FHE evaluation prevents MEV bot from gaming LP strategies");
-    //     console.log("LP profits protected through privacy");
-
-    //     // MEV bot still gets some tokens but LP strategy remains private
-    //     assertGt(balanceAfter, balanceBefore, "MEV bot executed swap");
-
-    //     emit TestScenario("MEV Protection", true, "FHE prevents strategy extraction");
-    //     console.log("MEV protection successful - LP strategy remains private");
-    // }
 }

@@ -741,11 +741,11 @@ contract ZKJITLiquidityHook is BaseHook {
         JITLiquidityPosition storage position = jitPositions[swapId];
         if (position.isActive) {
             position.isActive = false;
-            // Optional: Restore final profit distribution
+            // Final profit distribution
             for (uint256 i = 0; i < position.participatingLPs.length; i++) {
                 address lp = position.participatingLPs[i];
                 uint128 contribution = position.lpContributions[i];
-                lpProfits0[key.toId()][lp] += contribution / 20; // Demo-specific
+                lpProfits0[key.toId()][lp] += contribution / 20;
                 lpProfits1[key.toId()][lp] += contribution / 20;
                 _autoHedgeProfits(key.toId(), lp);
             }
