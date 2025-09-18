@@ -262,10 +262,6 @@ contract ZKJITLiquidityTest is Test, Deployers, CoFheTest {
     function testProfitHedging() public {
         console.log("\nTEST 3: Profit Hedging Functionality");
 
-        // Give the hook some tokens so it can pay out profits
-        MockERC20(Currency.unwrap(currency0)).mint(address(hook), 10000000000);
-        MockERC20(Currency.unwrap(currency1)).mint(address(hook), 10000000000);
-
         // Setup LP and generate some profits
         _setupLPWithProfits();
 
@@ -503,9 +499,6 @@ contract ZKJITLiquidityTest is Test, Deployers, CoFheTest {
 
     function testLPPositionManagement() public {
         console.log("\nTEST 6: LP Position Management");
-
-        MockERC20(Currency.unwrap(currency0)).mint(address(hook), 100000);
-        MockERC20(Currency.unwrap(currency1)).mint(address(hook), 100000);
 
         vm.startPrank(LP1);
 
