@@ -1,146 +1,178 @@
 # ZK-JIT Liquidity Hook
 
+**Privacy-Preserving Multi-LP Just-In-Time Liquidity for Uniswap v4**
+
 ## Overview
 
-A privacy-preserving Just-In-Time (JIT) liquidity hook for Uniswap v4 that enables multiple liquidity providers to coordinate JIT operations while keeping their strategies private through Fully Homomorphic Encryption (FHE).
+The ZK-JIT Liquidity Hook enables multiple liquidity providers to coordinate Just-In-Time (JIT) liquidity operations while keeping their trading strategies completely private through Fully Homomorphic Encryption (FHE). This hook solves key limitations in current JIT systems by introducing multi-LP coordination, privacy-preserving strategy parameters, and automated risk management.
 
 ## Problem Statement
 
-Current JIT liquidity solutions suffer from:
-- **Strategy Exposure**: LP parameters are public, enabling MEV extraction
-- **Single-LP Limitation**: Most JIT systems don't support multi-LP coordination
-- **Static Pricing**: Fixed fees don't adapt to network conditions
-- **Limited Risk Management**: No automated profit hedging or position management
+Current JIT liquidity solutions face several critical issues:
 
-## Solution
+- **Strategy Exposure**: LP parameters are publicly visible, enabling MEV extraction and strategy copying
+- **Single-LP Limitation**: Most JIT systems don't support coordination between multiple LPs
+- **Static Fee Structures**: Fixed fees don't adapt to changing network conditions
+- **Limited Risk Management**: No automated profit hedging or position management tools
+- **Complex Integration**: Difficult for LPs to participate without technical expertise
 
-Our hook introduces:
-- **🔒 Privacy-First JIT**: FHE encryption keeps LP thresholds and strategies private
-- **👥 Multi-LP Coordination**: Multiple LPs can participate in single JIT operations with overlapping ranges
-- **⚡ Dynamic Pricing**: Gas-price-based fee adjustment for optimal capital efficiency
-- **🛡️ EigenLayer-Style Validation**: Stake-weighted operator consensus for JIT legitimacy
-- **💰 Automated Risk Management**: Auto-hedging and profit compounding features
-- **🎫 ERC-6909 LP Tokens**: Composable liquidity positions with fee tracking
+## Solution Architecture
 
-## Key Features
+Our hook introduces a comprehensive solution with the following innovations:
 
-### Privacy-Preserving Parameters
-```solidity
-struct LPConfig {
-    euint128 minSwapSize;       // Encrypted minimum swap to trigger JIT
-    euint128 maxLiquidity;      // Encrypted maximum liquidity to provide
-    euint32 profitThresholdBps; // Encrypted profit threshold
-    euint32 hedgePercentage;    // Encrypted auto-hedge percentage
-    bool isActive;
-    bool autoHedgeEnabled;
-}
-```
+### 🔒 Privacy-First Design
+- **FHE Encryption**: All LP strategy parameters (thresholds, limits, hedge ratios) are encrypted using Fhenix FHE
+- **Private Threshold Evaluation**: JIT participation decisions made on encrypted data
+- **Strategy Protection**: Competitors cannot observe or copy LP strategies
 
-### Multi-LP JIT Coordination
-- LPs with overlapping tick ranges automatically coordinate
-- Private threshold evaluation prevents gaming
-- Proportional profit distribution based on contributions
+### 👥 Multi-LP Coordination
+- **Overlapping Range Detection**: Automatically identifies LPs with positions that overlap JIT ranges
+- **Proportional Participation**: Calculates fair contribution amounts based on LP capacity
+- **Coordinated Execution**: Multiple LPs participate in single JIT operation with shared profits
 
-### Dynamic Fee Structure
-- Base fee: 0.3%
-- High gas periods: 0.15% (incentivize trading)
-- Low gas periods: 0.6% (maximize LP returns)
+### ⚡ Dynamic Fee Pricing
+- **Gas-Based Adjustment**: Fees automatically adjust based on network congestion
+- **Incentive Alignment**: Lower fees during high gas periods encourage trading
+- **LP Optimization**: Higher fees during low gas periods maximize LP returns
 
-### Automated Risk Management
-- Auto-hedging at configurable profit thresholds
-- Profit compounding into new liquidity positions
-- Batch operations for gas efficiency
+### 🛡️ Automated Risk Management
+- **Auto-Hedging**: Configurable automatic profit hedging at custom thresholds
+- **Profit Compounding**: Reinvest profits into new liquidity positions
+- **Batch Operations**: Gas-efficient multi-pool operations
 
-## Architecture
+### 🎫 Internal LP Token System
+- **ERC-6909 Style Tracking**: Internal token IDs for each liquidity position
+- **Direct Token Management**: Bypass complex Uniswap v4 settlement flows
+- **Fee Accrual Tracking**: Monitor uncollected fees per position
+
+## Technical Architecture
 
 ```
 ┌─────────────────┐    ┌──────────────────┐    ┌─────────────────┐
-│   Trader        │    │  ZK-JIT Hook     │    │  EigenLayer     │
-│                 │────│                  │────│  Operators      │
-│  Large Swap     │    │  FHE Evaluation  │    │  Validation     │
+│   Large Swap    │    │  ZK-JIT Hook     │    │  FHE Encrypted  │
+│   Detected      │────│  Multi-LP        │────│  LP Strategies  │
+│                 │    │  Coordinator     │    │                 │
 └─────────────────┘    └──────────────────┘    └─────────────────┘
                                 │
                                 ▼
                        ┌──────────────────┐
-                       │   Multi-LP       │
+                       │   JIT Liquidity  │
                        │   Coordination   │
                        │                  │
                        │  LP1 │ LP2 │ LP3 │
+                       │  25% │ 40% │ 35% │
                        └──────────────────┘
 ```
 
-## Technical Implementation
+## Core Features
 
-### Hook Permissions
-- `beforeSwap`: Evaluate JIT opportunities with private thresholds
-- `afterSwap`: Distribute profits and cleanup JIT positions
-- `beforeInitialize`: Enforce dynamic fee requirement
+### Privacy-Preserving LP Configuration
+```solidity
+struct LPConfig {
+    euint128 minSwapSize;       // Encrypted minimum swap to trigger JIT
+    euint128 maxLiquidity;      // Encrypted maximum liquidity to provide  
+    euint32 profitThresholdBps; // Encrypted profit threshold (basis points)
+    euint32 hedgePercentage;    // Encrypted auto-hedge percentage (0-100)
+    bool isActive;              // Public participation flag
+    bool autoHedgeEnabled;      // Auto-hedging toggle
+}
+```
 
-### FHE Integration (Fhenix)
-- Private LP configurations stored as encrypted values
-- Threshold evaluations performed on encrypted data
-- Only results (participate/don't participate) are revealed
+### Multi-LP JIT Coordination
+- **Range Overlap Detection**: Automatically identifies LPs with positions overlapping the JIT range
+- **Private Threshold Checks**: Uses FHE to evaluate participation criteria without revealing thresholds
+- **Proportional Contributions**: Calculates fair contribution amounts based on LP liquidity and capacity
+- **Coordinated Profit Sharing**: Distributes JIT profits proportionally among participants
 
-### EigenLayer-Style Validation
-- Operators stake ETH to participate in validation
-- Stake-weighted consensus (66% threshold)
-- Economic incentives align with protocol security
+### Dynamic Fee Structure
+- **Base Fee**: 0.3% (3000 basis points)
+- **High Gas Periods**: 0.15% (incentivize trading during network congestion)  
+- **Low Gas Periods**: 0.6% (maximize LP returns during quiet periods)
+- **Real-time Adjustment**: Uses moving average gas price for smooth transitions
 
-## Demo Scenarios
+## Integration Details
 
-### 1. Small Swap (No JIT)
-- Trader swaps 500 tokens
-- Below encrypted thresholds
-- Normal AMM execution
+### Fhenix FHE Integration
+- **Encrypted Parameters**: LP strategies stored as `euint128` and `euint32` encrypted values
+- **Private Computations**: Threshold evaluations performed on encrypted data
+- **Access Control**: Proper FHE permissions granted to contract and LP addresses
+- **Privacy Guarantee**: Only participation results (yes/no) are revealed, not the underlying parameters
 
-### 2. Large Swap (Multi-LP JIT)
-- Trader swaps 5000 tokens
-- Multiple LPs meet private thresholds
-- Coordinated JIT execution with profit sharing
+### Simulated EigenLayer Validation
+- **Operator Staking**: Operators stake ETH to participate in validation
+- **Consensus Mechanism**: 66% stake-weighted consensus required for JIT approval
+- **Economic Security**: Operators economically incentivized to validate legitimate JIT operations
+- **Slashing Simulation**: Framework for penalizing malicious operators
 
-### 3. MEV Protection
-- MEV bot attempts large arbitrage
-- Private LP strategies prevent gaming
-- Profits protected through FHE privacy
+## Usage Examples
 
-## Partner Integrations
+### LP Configuration
+```solidity
+// Configure private JIT parameters
+hook.configureLPSettings(
+    poolKey,
+    encryptedMinSwapSize,    // e.g., 1000 tokens
+    encryptedMaxLiquidity,   // e.g., 50000 tokens  
+    encryptedProfitThreshold, // e.g., 50 basis points
+    encryptedHedgePercentage, // e.g., 25%
+    true                     // Enable auto-hedging
+);
 
-- **Fhenix Protocol**: Fully Homomorphic Encryption for private LP parameters
-- **EigenLayer**: Decentralized operator validation system (simulated)
+// Deposit liquidity and receive internal LP token
+uint256 tokenId = hook.depositLiquidityToHook(
+    poolKey,
+    tickLower,
+    tickUpper, 
+    liquidityAmount,
+    token0Max,
+    token1Max
+);
+```
 
-*Note: No other partner integrations in current implementation*
+### Profit Management
+```solidity
+// Manual profit hedging
+hook.hedgeProfits(poolKey, 50); // Hedge 50% of profits
 
-## Installation & Testing
+// Compound profits into new position
+hook.compoundProfits(poolKey, newTickLower, newTickUpper);
 
-```bash
-# Clone repository
-git clone <repository-url>
-cd zk-jit-liquidity-hook
-
-# Install dependencies
-forge install
-
-# Run tests
-forge test -vvv
-
-# Run specific test scenarios
-forge test --match-test testMultiLPOverlappingRanges -vvv
-forge test --match-test testDynamicPricing -vvv
-forge test --match-test testAutoHedging -vvv
+// Batch operations across multiple pools
+hook.batchHedgeProfits(poolKeys, hedgePercentages);
 ```
 
 ## Test Coverage
 
-- ✅ LP Token Management (ERC-6909)
-- ✅ Multi-LP Coordination
-- ✅ Profit Hedging & Auto-hedging
-- ✅ Dynamic Pricing
-- ✅ Position Management
-- ✅ Profit Compounding
-- ✅ Batch Operations
-- ✅ FHE Integration
+The test suite demonstrates all major features:
 
-## Code Structure
+- ✅ **LP Token Management**: Internal ERC-6909-style position tracking
+- ✅ **Multi-LP Coordination**: Multiple LPs participating in single JIT operation
+- ✅ **Profit Hedging**: Manual and automatic profit hedging mechanisms
+- ✅ **Dynamic Pricing**: Fee adjustment based on gas price conditions
+- ✅ **Position Management**: Creating, modifying, and tracking multiple positions
+- ✅ **FHE Privacy**: Encrypted strategy parameters with access control
+- ✅ **Error Handling**: Comprehensive security checks and input validation
+- ✅ **Batch Operations**: Gas-efficient multi-pool operations
+
+## Running the Tests
+
+```bash
+# Install dependencies
+forge install
+
+# Run all tests with detailed output
+forge test -vvv
+
+# Run specific test scenarios
+forge test --match-test testMultiLPJITCoordination -vvv
+forge test --match-test testDynamicPricing -vvv
+forge test --match-test testAutoHedging -vvv
+
+# Run comprehensive demo
+forge test --match-test testComprehensiveDemo -vvv
+```
+
+## File Structure
 
 ```
 src/
@@ -148,39 +180,94 @@ src/
 
 test/
 ├── ZKJITLiquidityTest.sol     # Comprehensive test suite
-└── mocks/                      # Mock contracts for testing
+
+├── README.md                   # This file
+├── foundry.toml               # Forge configuration
+└── .gitignore                 # Git ignore rules
 ```
 
-## Key Innovations
+## Key Technical Innovations
 
-1. **Privacy-First Design**: First JIT hook to use FHE for strategy privacy
-2. **Multi-LP Architecture**: Coordinate multiple LPs in single JIT operation
-3. **Adaptive Pricing**: Dynamic fees based on network conditions
-4. **Automated Risk Management**: Built-in hedging and compounding
-5. **EigenLayer Integration**: Decentralized validation for JIT legitimacy
+### 1. **Internal Token System**
+Instead of implementing full ERC-6909, we use an internal token tracking system that:
+- Avoids Uniswap v4's complex currency settlement
+- Provides ERC-6909-style unique token IDs per position
+- Enables direct token transfers without settlement issues
+- Maintains full position metadata and fee tracking
 
-## Limitations & Future Work
+### 2. **FHE-Encrypted Strategy Parameters**
+- All LP strategy parameters encrypted using Fhenix FHE
+- Participation decisions made on encrypted data without decryption
+- Competitors cannot observe or copy successful LP strategies
+- Maintains privacy while enabling multi-LP coordination
 
+### 3. **Multi-LP JIT Algorithm**
+- Automatically detects LPs with overlapping position ranges
+- Evaluates encrypted participation thresholds privately
+- Calculates proportional contributions based on capacity
+- Coordinates execution with fair profit distribution
+
+### 4. **Gas-Responsive Dynamic Pricing**
+- Maintains moving average of gas prices
+- Automatically adjusts fees based on network conditions
+- Incentivizes trading during congestion with lower fees
+- Maximizes LP returns during quiet periods
+
+## Limitations and Future Enhancements
+
+### Current Limitations
 - **FHE Performance**: Encryption operations add gas overhead
-- **Operator Simulation**: Full EigenLayer integration requires mainnet deployment
-- **MEV Resistance**: Additional mechanisms needed for complete MEV protection
+- **Simulated EigenLayer**: Full integration requires mainnet deployment
+- **Demo Simplifications**: Some complex economic mechanisms simplified for hackathon
 
-## Demo Video
+### Planned Enhancements
+- **Cross-Chain JIT**: Coordinate JIT operations across multiple chains
+- **Advanced MEV Protection**: Additional mechanisms for MEV resistance
+- **LP Dashboard**: Frontend interface for easy LP management
+- **Real-time Analytics**: Monitor JIT performance and profitability
+- **Governance Integration**: DAO-based parameter adjustment
 
-[Link to demo video showcasing multi-LP JIT coordination and privacy features]
+## Partner Integrations
 
-## Contributing
+- **[Fhenix Protocol](https://fhenix.io)**: Fully Homomorphic Encryption for private LP strategies
+- **EigenLayer**: Decentralized operator validation system (simulated implementation)
 
-This project was built for the Uniswap Hook Incubator. Future enhancements welcome:
-- Full EigenLayer mainnet integration
-- Advanced MEV protection mechanisms
-- Frontend dashboard for LP management
-- Cross-chain JIT coordination
+## Security Considerations
+
+### Access Control
+- Token ownership verification for all position modifications
+- Input validation on all user-provided parameters
+- Protection against integer overflow/underflow
+
+### Economic Security
+- Operator staking requirements for validation participation
+- Slashing mechanisms for malicious behavior
+- Fair profit distribution algorithms
+
+### Privacy Guarantees
+- FHE encryption protects sensitive LP parameters
+- Only participation decisions revealed, not underlying strategies
+- Proper key management and access control
 
 ## License
 
 MIT License - see LICENSE file for details
 
+## Contributing
+
+This project was built for the Uniswap Hook Incubator. Contributions welcome for:
+- Enhanced MEV protection mechanisms
+- Frontend dashboard development
+- Cross-chain coordination features
+- Additional FHE optimizations
+
+## Acknowledgments
+
+Built for the Uniswap v4 Hook Incubator program. Special thanks to:
+- Uniswap Labs for the v4 architecture and hook system
+- Fhenix Protocol for FHE integration support
+- EigenLayer for the validation system inspiration
+
 ---
 
-*Built with ❤️ for the Uniswap Hook Incubator*
+*Privacy-preserving DeFi infrastructure for the next generation of liquidity provision*

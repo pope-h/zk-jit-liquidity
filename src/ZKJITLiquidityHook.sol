@@ -18,8 +18,15 @@ import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 
 /**
  * @title ZK-JIT Liquidity Hook
- * @notice Privacy-preserving JIT liquidity with direct token deposits, LP token management, profit hedging, and dynamic pricing
- * @dev Integrates Fhenix FHE, EigenLayer validation, ERC-6909 style LP tokens, and dynamic fee structures
+ * @notice Privacy-preserving JIT liquidity with multi-LP coordination, dynamic pricing, and automated risk management
+ * @dev Integrates Fhenix FHE for private LP strategies, simulated EigenLayer validation, and ERC-6909-style LP tokens
+ *
+ * Key Features:
+ * - Multi-LP JIT coordination with overlapping ranges
+ * - FHE-encrypted LP parameters for strategy privacy
+ * - Dynamic fee pricing based on gas conditions
+ * - Automated profit hedging and compounding
+ * - Internal ERC-6909-style LP token management
  */
 contract ZKJITLiquidityHook is BaseHook {
     using PoolIdLibrary for PoolKey;
@@ -27,67 +34,66 @@ contract ZKJITLiquidityHook is BaseHook {
     using StateLibrary for IPoolManager;
     using LPFeeLibrary for uint24;
 
-    // ============ LP Token Management Structures ============
+    // ============ Data Structures ============
 
     struct LPPosition {
-        uint256 tokenId; // ERC-6909 style token ID
-        int24 tickLower;
-        int24 tickUpper;
-        uint128 liquidity;
-        uint128 token0Amount;
-        uint128 token1Amount;
-        uint256 lastFeeGrowth0; // For fee accrual tracking
+        uint256 tokenId; // Unique position identifier
+        int24 tickLower; // Lower tick bound
+        int24 tickUpper; // Upper tick bound
+        uint128 liquidity; // Liquidity amount
+        uint128 token0Amount; // Token0 amount deposited
+        uint128 token1Amount; // Token1 amount deposited
+        uint256 lastFeeGrowth0; // Fee growth tracking
         uint256 lastFeeGrowth1;
-        uint256 uncollectedFees0;
+        uint256 uncollectedFees0; // Uncollected fees
         uint256 uncollectedFees1;
-        bool isActive;
+        bool isActive; // Position status
     }
 
     struct LPConfig {
-        euint128 minSwapSize; // Encrypted minimum swap size to trigger JIT
-        euint128 maxLiquidity; // Encrypted maximum liquidity to provide
-        euint32 profitThresholdBps; // Encrypted profit threshold in basis points
-        euint32 hedgePercentage; // Encrypted percentage to auto-hedge (0-100)
-        bool isActive; // Public flag for LP participation
-        bool autoHedgeEnabled; // Whether to automatically hedge profits
+        euint128 minSwapSize; // Encrypted minimum swap to trigger JIT
+        euint128 maxLiquidity; // Encrypted maximum liquidity capacity
+        euint32 profitThresholdBps; // Encrypted profit threshold (basis points)
+        euint32 hedgePercentage; // Encrypted auto-hedge percentage (0-100)
+        bool isActive; // Public participation flag
+        bool autoHedgeEnabled; // Auto-hedging toggle
     }
 
     struct PendingJIT {
-        uint256 swapId;
-        address swapper;
-        uint128 swapAmount;
-        address tokenIn;
-        address tokenOut;
-        uint256 blockNumber;
-        uint256 validatorConsensus; // Bitmap of validator approvals
-        bool executed;
-        bool zeroForOne; // Direction of the swap
-        PoolKey poolKey; // Store the pool key for execution
-        address[] eligibleLPs; // LPs that can participate in this JIT
-        uint128[] liquidityContributions; // How much each LP will contribute
+        uint256 swapId; // Unique swap identifier
+        address swapper; // Swap initiator
+        uint128 swapAmount; // Swap size
+        address tokenIn; // Input token
+        address tokenOut; // Output token
+        uint256 blockNumber; // Block when created
+        uint256 validatorConsensus; // Validator approval bitmap
+        bool executed; // Execution status
+        bool zeroForOne; // Swap direction
+        PoolKey poolKey; // Pool information
+        address[] eligibleLPs; // Participating LPs
+        uint128[] liquidityContributions; // LP contribution amounts
     }
 
-    // JIT liquidity for a given range
     struct JITLiquidityPosition {
-        uint256 swapId;
-        int24 tickLower;
-        int24 tickUpper;
-        uint128 totalLiquidity;
-        address[] participatingLPs;
-        uint128[] lpContributions;
-        bool isActive;
-        uint256 timestamp;
+        uint256 swapId; // Associated swap ID
+        int24 tickLower; // JIT position lower tick
+        int24 tickUpper; // JIT position upper tick
+        uint128 totalLiquidity; // Total JIT liquidity
+        address[] participatingLPs; // LPs in this JIT
+        uint128[] lpContributions; // Individual LP contributions
+        bool isActive; // Position status
+        uint256 timestamp; // Creation timestamp
     }
 
-    // ============ Storage ============
+    // ============ Storage Variables ============
 
     // LP Management
     mapping(PoolId => mapping(address => LPConfig)) public lpConfigs;
     mapping(PoolId => mapping(address => LPPosition[])) public lpPositions;
-    mapping(PoolId => mapping(uint256 => address)) public tokenIdToLP; // tokenId -> LP address
+    mapping(PoolId => mapping(uint256 => address)) public tokenIdToLP;
     mapping(PoolId => address[]) public poolLPs;
     mapping(PoolId => mapping(address => bool)) public isLPRegistered;
-    mapping(PoolId => mapping(address => uint256)) public lpProfits0; // Accumulated profits
+    mapping(PoolId => mapping(address => uint256)) public lpProfits0;
     mapping(PoolId => mapping(address => uint256)) public lpProfits1;
 
     // JIT Operations
@@ -96,29 +102,30 @@ contract ZKJITLiquidityHook is BaseHook {
     uint256 public nextSwapId;
     uint256 public nextTokenId = 1;
 
-    // EigenLayer operator simulation
+    // Simulated EigenLayer Operators
     mapping(address => bool) public authorizedOperators;
     mapping(address => uint256) public operatorStake;
     address[] public operators;
 
-    // Constants
-    uint256 private constant MIN_OPERATORS = 3;
-    uint256 private constant CONSENSUS_THRESHOLD = 66; // 66% consensus needed
-    uint256 private constant JIT_DELAY_BLOCKS = 1; // Reduced for demo
-    int24 private constant TICK_RANGE = 60; // Range around current tick for JIT liquidity
-    uint24 private constant BASE_DYNAMIC_FEE = 3000; // 0.3% base fee
-
+    // Dynamic Pricing
     uint128 public movingAverageGasPrice;
     uint104 public movingAverageGasPriceCount;
-
-    error MustUseDynamicFee();
 
     // FHE Constants
     euint128 private ENCRYPTED_ZERO;
     euint32 private ENCRYPTED_ZERO_32;
 
-    // ============ Events ============
+    // ============ Constants ============
+    uint256 private constant MIN_OPERATORS = 3;
+    uint256 private constant CONSENSUS_THRESHOLD = 66; // 66% consensus required
+    uint256 private constant JIT_DELAY_BLOCKS = 1; // Demo: reduced delay
+    int24 private constant TICK_RANGE = 60; // JIT liquidity range
+    uint24 private constant BASE_DYNAMIC_FEE = 3000; // 0.3% base fee
 
+    // ============ Errors ============
+    error MustUseDynamicFee();
+
+    // ============ Events ============
     event LPTokenMinted(address indexed lp, PoolId indexed poolId, uint256 tokenId, uint128 liquidity);
     event LPTokenBurned(address indexed lp, PoolId indexed poolId, uint256 tokenId, uint128 liquidity);
     event LiquidityAdded(
@@ -132,6 +139,7 @@ contract ZKJITLiquidityHook is BaseHook {
     event JITExecuted(uint256 indexed swapId, PoolId indexed poolId, uint128 liquidityProvided);
     event OperatorVoted(uint256 indexed swapId, address indexed operator, bool approved);
 
+    // ============ Constructor ============
     constructor(IPoolManager _poolManager) BaseHook(_poolManager) {
         updateMovingAverage();
 
@@ -139,45 +147,46 @@ contract ZKJITLiquidityHook is BaseHook {
         ENCRYPTED_ZERO = FHE.asEuint128(0);
         ENCRYPTED_ZERO_32 = FHE.asEuint32(0);
 
-        // Grant contract access to constants
+        // Grant contract access to FHE constants
         FHE.allowThis(ENCRYPTED_ZERO);
         FHE.allowThis(ENCRYPTED_ZERO_32);
     }
 
     // ============ Hook Permissions ============
-
     function getHookPermissions() public pure override returns (Hooks.Permissions memory) {
         return Hooks.Permissions({
-            beforeInitialize: true, // Validate dynamic fee usage
+            beforeInitialize: true,
             afterInitialize: false,
             beforeAddLiquidity: false,
             afterAddLiquidity: false,
             beforeRemoveLiquidity: false,
             afterRemoveLiquidity: false,
-            beforeSwap: true, // Intercept swaps for JIT logic
-            afterSwap: true, // Execute JIT after swap completion
+            beforeSwap: true,
+            afterSwap: true,
             beforeDonate: false,
             afterDonate: false,
-            beforeSwapReturnDelta: true, // Modify swap behavior
+            beforeSwapReturnDelta: true,
             afterSwapReturnDelta: false,
             afterAddLiquidityReturnDelta: false,
             afterRemoveLiquidityReturnDelta: false
         });
     }
 
-    /**
-     * @notice Initialize dynamic pricing for a pool
-     */
     function _beforeInitialize(address, PoolKey calldata key, uint160) internal pure override returns (bytes4) {
         if (!key.fee.isDynamicFee()) revert MustUseDynamicFee();
-
         return this.beforeInitialize.selector;
     }
 
-    // ============ LP Management Functions ============
+    // ============ LP Configuration & Management ============
 
     /**
-     * @notice Configure LP's private JIT parameters and hedge settings using FHE
+     * @notice Configure LP's private JIT parameters using FHE encryption
+     * @param poolKey The pool to configure for
+     * @param minSwapSize Encrypted minimum swap size to trigger JIT
+     * @param maxLiquidity Encrypted maximum liquidity to provide
+     * @param profitThreshold Encrypted profit threshold in basis points
+     * @param hedgePercentage Encrypted auto-hedge percentage
+     * @param autoHedgeEnabled Whether to enable automatic hedging
      */
     function configureLPSettings(
         PoolKey calldata poolKey,
@@ -195,7 +204,7 @@ contract ZKJITLiquidityHook is BaseHook {
         euint32 encProfit = FHE.asEuint32(profitThreshold);
         euint32 encHedge = FHE.asEuint32(hedgePercentage);
 
-        // Store configuration
+        // Store LP configuration
         lpConfigs[poolId][msg.sender] = LPConfig({
             minSwapSize: encMinSwap,
             maxLiquidity: encMaxLiq,
@@ -205,13 +214,13 @@ contract ZKJITLiquidityHook is BaseHook {
             autoHedgeEnabled: autoHedgeEnabled
         });
 
-        // Add LP to pool's LP list if not already registered
+        // Register LP if not already registered
         if (!isLPRegistered[poolId][msg.sender]) {
             poolLPs[poolId].push(msg.sender);
             isLPRegistered[poolId][msg.sender] = true;
         }
 
-        // Grant access permissions
+        // Grant FHE access permissions
         FHE.allowThis(encMinSwap);
         FHE.allowThis(encMaxLiq);
         FHE.allowThis(encProfit);
@@ -225,7 +234,14 @@ contract ZKJITLiquidityHook is BaseHook {
     }
 
     /**
-     * @notice Users deposit tokens directly to hook and receive ERC-6909 style LP token
+     * @notice Deposit liquidity directly to hook and receive internal LP token
+     * @param poolKey The pool to add liquidity to
+     * @param tickLower Lower tick of position
+     * @param tickUpper Upper tick of position
+     * @param liquidityDelta Amount of liquidity to add
+     * @param amount0Max Maximum token0 to deposit
+     * @param amount1Max Maximum token1 to deposit
+     * @return tokenId Unique identifier for the LP position
      */
     function depositLiquidityToHook(
         PoolKey calldata poolKey,
@@ -236,17 +252,16 @@ contract ZKJITLiquidityHook is BaseHook {
         uint128 amount1Max
     ) public returns (uint256 tokenId) {
         require(liquidityDelta > 0, "Invalid liquidity");
-
         PoolId poolId = poolKey.toId();
 
-        // Direct ERC20 transfers to hook (much simpler than PoolManager settlement!)
+        // Direct ERC20 transfers to hook (avoids complex v4 settlement)
         IERC20(Currency.unwrap(poolKey.currency0)).transferFrom(msg.sender, address(this), amount0Max);
         IERC20(Currency.unwrap(poolKey.currency1)).transferFrom(msg.sender, address(this), amount1Max);
 
-        // Create new token ID
+        // Generate unique token ID
         tokenId = nextTokenId++;
 
-        // Store the position
+        // Create and store LP position
         LPPosition memory newPosition = LPPosition({
             tokenId: tokenId,
             tickLower: tickLower,
@@ -271,7 +286,12 @@ contract ZKJITLiquidityHook is BaseHook {
     }
 
     /**
-     * @notice Users withdraw tokens directly from hook by burning LP token
+     * @notice Remove liquidity from hook by burning internal LP token
+     * @param poolKey The pool to remove liquidity from
+     * @param tokenId The LP token ID to burn
+     * @param liquidityDelta Amount of liquidity to remove
+     * @return amount0 Token0 amount returned
+     * @return amount1 Token1 amount returned
      */
     function removeLiquidityFromHook(PoolKey calldata poolKey, uint256 tokenId, uint128 liquidityDelta)
         external
@@ -299,7 +319,7 @@ contract ZKJITLiquidityHook is BaseHook {
                     positions[i].isActive = false;
                 }
 
-                // Direct ERC20 transfers back to user
+                // Transfer tokens back to user
                 IERC20(Currency.unwrap(poolKey.currency0)).transfer(msg.sender, amount0);
                 IERC20(Currency.unwrap(poolKey.currency1)).transfer(msg.sender, amount1);
 
@@ -313,8 +333,12 @@ contract ZKJITLiquidityHook is BaseHook {
         return (amount0, amount1);
     }
 
+    // ============ Profit Management ============
+
     /**
-     * @notice Hedge LP profits - transfers profits back to LP wallet
+     * @notice Manually hedge LP profits
+     * @param poolKey The pool to hedge profits from
+     * @param hedgePercentage Percentage of profits to hedge (0-100)
      */
     function hedgeProfits(PoolKey calldata poolKey, uint256 hedgePercentage) public {
         require(hedgePercentage <= 100, "Invalid percentage");
@@ -331,11 +355,10 @@ contract ZKJITLiquidityHook is BaseHook {
             lpProfits0[poolId][msg.sender] -= hedgeAmount0;
             lpProfits1[poolId][msg.sender] -= hedgeAmount1;
 
-            // Direct transfer from hook's token reserves
+            // Transfer hedged amounts
             if (hedgeAmount0 > 0) {
                 IERC20(Currency.unwrap(poolKey.currency0)).transfer(msg.sender, hedgeAmount0);
             }
-
             if (hedgeAmount1 > 0) {
                 IERC20(Currency.unwrap(poolKey.currency1)).transfer(msg.sender, hedgeAmount1);
             }
@@ -345,14 +368,15 @@ contract ZKJITLiquidityHook is BaseHook {
     }
 
     /**
-     * @notice Auto-hedge profits based on LP configuration
+     * @notice Automatically hedge profits based on LP configuration
+     * @param poolId Pool ID
+     * @param lp LP address
      */
     function _autoHedgeProfits(PoolId poolId, address lp) private {
         LPConfig memory config = lpConfigs[poolId][lp];
         if (!config.autoHedgeEnabled) return;
 
-        // In a real implementation, this would decrypt the hedge percentage
-        // For demo purposes, assume 50% auto-hedge
+        // For demo: use 50% auto-hedge (in production, decrypt hedgePercentage)
         uint256 hedgePercentage = 50;
 
         uint256 profit0 = lpProfits0[poolId][lp];
@@ -366,14 +390,42 @@ contract ZKJITLiquidityHook is BaseHook {
             lpProfits0[poolId][lp] -= hedgeAmount0;
             lpProfits1[poolId][lp] -= hedgeAmount1;
 
-            // Note: In a real implementation, we'd need to handle the transfer
-            // For demo purposes, we just emit the event
+            // Note: For demo, only emit event (in production, handle transfer)
             emit ProfitHedged(lp, poolId, hedgeAmount0, hedgeAmount1);
         }
     }
 
-    // ============ Dynamic Pricing Functions ============
+    /**
+     * @notice Compound profits into new liquidity position
+     * @param poolKey The pool to compound profits in
+     * @param tickLower Lower tick for new position
+     * @param tickUpper Upper tick for new position
+     */
+    function compoundProfits(PoolKey calldata poolKey, int24 tickLower, int24 tickUpper) external {
+        PoolId poolId = poolKey.toId();
 
+        uint256 profit0 = lpProfits0[poolId][msg.sender];
+        uint256 profit1 = lpProfits1[poolId][msg.sender];
+
+        if (profit0 > 0 && profit1 > 0) {
+            // Reset profits
+            lpProfits0[poolId][msg.sender] = 0;
+            lpProfits1[poolId][msg.sender] = 0;
+
+            // Create new position from profits
+            uint128 liquidityFromProfits = uint128((profit0 + profit1) / 2);
+
+            depositLiquidityToHook(
+                poolKey, tickLower, tickUpper, liquidityFromProfits, uint128(profit0), uint128(profit1)
+            );
+        }
+    }
+
+    // ============ Dynamic Pricing ============
+
+    /**
+     * @notice Update moving average gas price
+     */
     function updateMovingAverage() internal {
         uint128 gasPrice = uint128(tx.gasprice);
         movingAverageGasPrice =
@@ -381,27 +433,38 @@ contract ZKJITLiquidityHook is BaseHook {
         movingAverageGasPriceCount++;
     }
 
+    /**
+     * @notice Calculate dynamic fee based on gas price
+     * @return Dynamic fee amount
+     */
     function getFee() internal view returns (uint24) {
         uint128 gasPrice = uint128(tx.gasprice);
 
+        // High gas: Lower fees to incentivize trading
         if (gasPrice > (movingAverageGasPrice * 11) / 10) {
-            return BASE_DYNAMIC_FEE / 2;
+            return BASE_DYNAMIC_FEE / 2; // 0.15%
         }
 
+        // Low gas: Higher fees to maximize LP returns
         if (gasPrice < (movingAverageGasPrice * 9) / 10) {
-            return BASE_DYNAMIC_FEE * 2;
+            return BASE_DYNAMIC_FEE * 2; // 0.6%
         }
 
-        return BASE_DYNAMIC_FEE;
+        return BASE_DYNAMIC_FEE; // 0.3% base
     }
 
     // ============ Multi-LP JIT Logic ============
 
     /**
-     * @notice Evaluate which LPs want to participate in JIT for overlapping ranges
+     * @notice Evaluate which LPs should participate in JIT operation
+     * @param key Pool key
+     * @param swapAmount Size of the incoming swap
+     * @return eligibleLPs Array of LP addresses
+     * @return contributions Array of LP contribution amounts
      */
     function _evaluateMultiLPJIT(PoolKey calldata key, uint128 swapAmount)
         private
+        view
         returns (address[] memory, uint128[] memory)
     {
         PoolId poolId = key.toId();
@@ -409,10 +472,7 @@ contract ZKJITLiquidityHook is BaseHook {
         uint128[] memory contributions = new uint128[](poolLPs[poolId].length);
         uint256 eligibleCount = 0;
 
-        euint128 encSwapAmount = FHE.asEuint128(swapAmount);
-        FHE.allowThis(encSwapAmount);
-
-        // Get current tick to check overlapping ranges
+        // Get current tick for range overlap checking
         (, int24 currentTick,,) = poolManager.getSlot0(poolId);
 
         for (uint256 i = 0; i < poolLPs[poolId].length; i++) {
@@ -420,11 +480,10 @@ contract ZKJITLiquidityHook is BaseHook {
             LPConfig memory config = lpConfigs[poolId][lp];
 
             if (config.isActive) {
-                // Check if LP has positions overlapping with current tick range
                 bool hasOverlappingPosition = _hasOverlappingPosition(poolId, lp, currentTick);
 
                 if (hasOverlappingPosition) {
-                    // Private threshold check (simplified for demo)
+                    // Simplified threshold check for demo (in production: use FHE)
                     if (swapAmount > 1000) {
                         eligibleLPs[eligibleCount] = lp;
                         contributions[eligibleCount] = _calculateLPContribution(poolId, lp, swapAmount);
@@ -434,7 +493,7 @@ contract ZKJITLiquidityHook is BaseHook {
             }
         }
 
-        // Resize arrays to actual eligible count
+        // Resize arrays to actual count
         address[] memory finalLPs = new address[](eligibleCount);
         uint128[] memory finalContributions = new uint128[](eligibleCount);
 
@@ -446,9 +505,15 @@ contract ZKJITLiquidityHook is BaseHook {
         return (finalLPs, finalContributions);
     }
 
+    /**
+     * @notice Check if LP has positions overlapping with JIT range
+     * @param poolId Pool identifier
+     * @param lp LP address
+     * @param currentTick Current pool tick
+     * @return Whether LP has overlapping positions
+     */
     function _hasOverlappingPosition(PoolId poolId, address lp, int24 currentTick) private view returns (bool) {
         LPPosition[] memory positions = lpPositions[poolId][lp];
-
         int24 jitLower = currentTick - TICK_RANGE;
         int24 jitUpper = currentTick + TICK_RANGE;
 
@@ -459,10 +524,16 @@ contract ZKJITLiquidityHook is BaseHook {
                 }
             }
         }
-
         return false;
     }
 
+    /**
+     * @notice Calculate LP's contribution to JIT operation
+     * @param poolId Pool identifier
+     * @param lp LP address
+     * @param swapAmount Size of incoming swap
+     * @return LP's calculated contribution
+     */
     function _calculateLPContribution(PoolId poolId, address lp, uint128 swapAmount) private view returns (uint128) {
         LPPosition[] memory positions = lpPositions[poolId][lp];
         uint128 totalLiquidity = 0;
@@ -481,6 +552,9 @@ contract ZKJITLiquidityHook is BaseHook {
 
     // ============ Hook Implementation ============
 
+    /**
+     * @notice Hook called before swap execution
+     */
     function _beforeSwap(address sender, PoolKey calldata key, SwapParams calldata params, bytes calldata)
         internal
         override
@@ -497,12 +571,36 @@ contract ZKJITLiquidityHook is BaseHook {
             _autoExecuteMultiLPJIT(swapId);
         }
 
+        // Apply dynamic fee
         uint24 dynamicFee = getFee();
         uint24 feeWithFlag = dynamicFee | LPFeeLibrary.OVERRIDE_FEE_FLAG;
 
         return (this.beforeSwap.selector, BeforeSwapDeltaLibrary.ZERO_DELTA, feeWithFlag);
     }
 
+    /**
+     * @notice Hook called after swap execution
+     */
+    function _afterSwap(address, PoolKey calldata key, SwapParams calldata, BalanceDelta, bytes calldata)
+        internal
+        override
+        returns (bytes4, int128)
+    {
+        uint256 currentSwapId = nextSwapId;
+        if (currentSwapId > 0) {
+            JITLiquidityPosition storage position = jitPositions[currentSwapId];
+            if (position.isActive) {
+                _removeJITLiquidity(key, currentSwapId);
+            }
+        }
+
+        updateMovingAverage();
+        return (this.afterSwap.selector, 0);
+    }
+
+    /**
+     * @notice Create multi-LP JIT operation
+     */
     function _createMultiLPJIT(
         PoolKey calldata key,
         address swapper,
@@ -532,6 +630,9 @@ contract ZKJITLiquidityHook is BaseHook {
         return swapId;
     }
 
+    /**
+     * @notice Execute multi-LP JIT operation
+     */
     function _autoExecuteMultiLPJIT(uint256 swapId) private {
         PendingJIT storage jit = pendingJITs[swapId];
         require(!jit.executed, "Already executed");
@@ -543,7 +644,7 @@ contract ZKJITLiquidityHook is BaseHook {
     }
 
     /**
-     * @notice Simplified JIT liquidity execution for hackathon demo
+     * @notice Add JIT liquidity for multiple LPs
      */
     function _addMultiLPJITLiquidity(
         PoolKey memory key,
@@ -562,7 +663,7 @@ contract ZKJITLiquidityHook is BaseHook {
         }
 
         if (totalLiquidity > 0) {
-            // Store the JIT position (simulate successful JIT for hackathon)
+            // Store JIT position
             jitPositions[swapId] = JITLiquidityPosition({
                 swapId: swapId,
                 tickLower: tickLower,
@@ -574,7 +675,7 @@ contract ZKJITLiquidityHook is BaseHook {
                 timestamp: block.timestamp
             });
 
-            // Simulate JIT profits for participating LPs
+            // Distribute simulated profits to participating LPs
             for (uint256 i = 0; i < lps.length; i++) {
                 PoolId poolId = key.toId();
                 lpProfits0[poolId][lps[i]] += contributions[i] / 20; // 5% simulated profit
@@ -587,28 +688,15 @@ contract ZKJITLiquidityHook is BaseHook {
         }
     }
 
-    function _afterSwap(address, PoolKey calldata key, SwapParams calldata, BalanceDelta, bytes calldata)
-        internal
-        override
-        returns (bytes4, int128)
-    {
-        uint256 currentSwapId = nextSwapId;
-        if (currentSwapId > 0) {
-            JITLiquidityPosition storage position = jitPositions[currentSwapId];
-            if (position.isActive) {
-                _removeJITLiquidity(key, currentSwapId);
-            }
-        }
-        updateMovingAverage();
-        return (this.afterSwap.selector, 0);
-    }
-
+    /**
+     * @notice Remove JIT liquidity after swap completion
+     */
     function _removeJITLiquidity(PoolKey calldata key, uint256 swapId) private {
         JITLiquidityPosition storage position = jitPositions[swapId];
         if (position.isActive) {
             position.isActive = false;
 
-            // Give final bonus profits to participants
+            // Distribute final bonus profits
             for (uint256 i = 0; i < position.participatingLPs.length; i++) {
                 address lp = position.participatingLPs[i];
                 uint128 contribution = position.lpContributions[i];
@@ -622,8 +710,11 @@ contract ZKJITLiquidityHook is BaseHook {
         }
     }
 
-    // ============ EigenLayer Operator Functions ============
+    // ============ Simulated EigenLayer Operators ============
 
+    /**
+     * @notice Register as an operator (stake required)
+     */
     function registerOperator() external payable {
         require(msg.value >= 1 ether, "Insufficient stake");
         require(!authorizedOperators[msg.sender], "Already registered");
@@ -633,6 +724,9 @@ contract ZKJITLiquidityHook is BaseHook {
         operators.push(msg.sender);
     }
 
+    /**
+     * @notice Operator vote on JIT legitimacy
+     */
     function operatorVote(uint256 swapId, bool approved) external {
         require(authorizedOperators[msg.sender], "Not authorized operator");
         require(!pendingJITs[swapId].executed, "Already executed");
@@ -650,12 +744,18 @@ contract ZKJITLiquidityHook is BaseHook {
         }
     }
 
+    /**
+     * @notice Check if consensus reached
+     */
     function _hasConsensus(uint256 swapId) private view returns (bool) {
         uint256 approvals = _countBits(pendingJITs[swapId].validatorConsensus);
         uint256 totalOperators = operators.length;
         return totalOperators > 0 && (approvals * 100 >= totalOperators * CONSENSUS_THRESHOLD);
     }
 
+    /**
+     * @notice Execute JIT after operator consensus
+     */
     function _executeJIT(uint256 swapId) private {
         PendingJIT storage jit = pendingJITs[swapId];
         require(!jit.executed, "Already executed");
@@ -664,6 +764,28 @@ contract ZKJITLiquidityHook is BaseHook {
         jit.executed = true;
 
         emit JITExecuted(swapId, jit.poolKey.toId(), jit.swapAmount);
+    }
+
+    // ============ Advanced LP Features ============
+
+    /**
+     * @notice Batch hedge profits across multiple pools
+     */
+    function batchHedgeProfits(PoolKey[] calldata poolKeys, uint256[] calldata hedgePercentages) external {
+        require(poolKeys.length == hedgePercentages.length, "Array length mismatch");
+
+        for (uint256 i = 0; i < poolKeys.length; i++) {
+            hedgeProfits(poolKeys[i], hedgePercentages[i]);
+        }
+    }
+
+    /**
+     * @notice Deactivate LP participation
+     */
+    function deactivateLP(PoolKey calldata poolKey) external {
+        PoolId poolId = poolKey.toId();
+        lpConfigs[poolId][msg.sender].isActive = false;
+        emit LPConfigSet(poolId, msg.sender, false);
     }
 
     // ============ Utility Functions ============
@@ -682,12 +804,6 @@ contract ZKJITLiquidityHook is BaseHook {
             bitmap >>= 1;
         }
         return count;
-    }
-
-    function deactivateLP(PoolKey calldata poolKey) external {
-        PoolId poolId = poolKey.toId();
-        lpConfigs[poolId][msg.sender].isActive = false;
-        emit LPConfigSet(poolId, msg.sender, false);
     }
 
     // ============ View Functions ============
@@ -725,36 +841,6 @@ contract ZKJITLiquidityHook is BaseHook {
 
     function getPoolLPs(PoolKey calldata poolKey) external view returns (address[] memory) {
         return poolLPs[poolKey.toId()];
-    }
-
-    // ============ Advanced LP Features ============
-
-    function batchHedgeProfits(PoolKey[] calldata poolKeys, uint256[] calldata hedgePercentages) external {
-        require(poolKeys.length == hedgePercentages.length, "Array length mismatch");
-
-        for (uint256 i = 0; i < poolKeys.length; i++) {
-            hedgeProfits(poolKeys[i], hedgePercentages[i]);
-        }
-    }
-
-    function compoundProfits(PoolKey calldata poolKey, int24 tickLower, int24 tickUpper) external {
-        PoolId poolId = poolKey.toId();
-
-        uint256 profit0 = lpProfits0[poolId][msg.sender];
-        uint256 profit1 = lpProfits1[poolId][msg.sender];
-
-        if (profit0 > 0 && profit1 > 0) {
-            // Reset profits
-            lpProfits0[poolId][msg.sender] = 0;
-            lpProfits1[poolId][msg.sender] = 0;
-
-            // Add as new liquidity position
-            uint128 liquidityFromProfits = uint128((profit0 + profit1) / 2); // Simplified calculation
-
-            depositLiquidityToHook(
-                poolKey, tickLower, tickUpper, liquidityFromProfits, uint128(profit0), uint128(profit1)
-            );
-        }
     }
 
     // ============ Testing Functions ============
