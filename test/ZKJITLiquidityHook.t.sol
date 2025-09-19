@@ -532,6 +532,8 @@ contract ZKJITLiquidityTest is Test, Deployers, CoFheTest {
 
         vm.startPrank(LP1);
 
+        uint256 userBalance0Before = currency0.balanceOf(LP1);
+
         // Setup batch hedging parameters
         PoolKey[] memory pools = new PoolKey[](3);
         uint256[] memory hedgePercentages = new uint256[](3);
@@ -547,6 +549,10 @@ contract ZKJITLiquidityTest is Test, Deployers, CoFheTest {
         // Execute batch hedging
         try hook.batchHedgeProfits(pools, hedgePercentages) {
             console.log("Batch hedging executed successfully");
+            
+            uint256 userBalance0After = currency0.balanceOf(LP1);
+            assertGt(userBalance0After, userBalance0Before, "Should receive hedged tokens");
+
             emit TestScenario("Batch Operations", true, "Multiple pools processed in single transaction");
         } catch {
             console.log("Batch hedging failed (expected in demo setup)");
